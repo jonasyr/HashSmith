@@ -150,7 +150,7 @@ $script:Config = @{
     
     # Logging-Settings
     LogDateFormat = "yyyy-MM-dd HH:mm:ss.fff"
-    LogFileEncoding = "UTF8"
+    LogFileEncoding = "utf8"
     
     # Hash-Settings
     BufferSize = 64KB
@@ -238,10 +238,22 @@ function Write-LogEntry {
             $script:LogMutex.WaitOne() | Out-Null
         }
         try {
-            if ($PSVersionTable.PSVersion.Major -ge 6) {
-                Add-Content -Path $LogFilePath -Value $jsonEntry -Encoding $script:Config.LogFileEncoding -ErrorAction SilentlyContinue
-            } else {
-                Add-Content -Path $LogFilePath -Value $jsonEntry -Encoding UTF8 -ErrorAction SilentlyContinue
+            # Vereinfachte Encoding-Behandlung
+            Add-Content -Path $LogFilePath -Value $jsonEntry -Encoding utf8 -ErrorAction SilentlyContinue
+        }
+        catch {
+            # Fallback ohne Encoding-Parameter
+            try {
+                Add-Content -Path $LogFilePath -Value $jsonEntry -ErrorAction SilentlyContinue
+            }
+            catch {
+                # Letzter Fallback - direkte Datei-Schreibung
+                try {
+                    $jsonEntry | Out-File -FilePath $LogFilePath -Append -ErrorAction SilentlyContinue
+                }
+                catch {
+                    # Ignore logging errors to prevent recursive issues
+                }
             }
         }
         finally {
@@ -679,8 +691,13 @@ function Initialize-LogFile {
     )
     
     try {
+        Write-Host "DEBUG: Initialisiere Log-Datei: $LogPath" -ForegroundColor Yellow
+        
         $logDir = Split-Path $LogPath -Parent
+        Write-Host "DEBUG: Log-Verzeichnis: $logDir" -ForegroundColor Yellow
+        
         if ($logDir -and -not (Test-Path $logDir)) {
+            Write-Host "DEBUG: Erstelle Log-Verzeichnis: $logDir" -ForegroundColor Yellow
             New-Item -Path $logDir -ItemType Directory -Force | Out-Null
         }
         
@@ -697,17 +714,23 @@ function Initialize-LogFile {
         }
         
         $headerJson = $header | ConvertTo-Json -Compress
-        if ($PSVersionTable.PSVersion.Major -ge 6) {
-            Set-Content -Path $LogPath -Value "# MD5 Checksum Log - $headerJson" -Encoding $script:Config.LogFileEncoding
-        } else {
-            Set-Content -Path $LogPath -Value "# MD5 Checksum Log - $headerJson" -Encoding UTF8
+        Write-Host "DEBUG: Schreibe Header in Log-Datei" -ForegroundColor Yellow
+        
+        # Robuste Log-Datei-Erstellung
+        try {
+            Set-Content -Path $LogPath -Value "# MD5 Checksum Log - $headerJson" -Encoding utf8 -ErrorAction Stop
+        }
+        catch {
+            Write-Host "DEBUG: Fehler beim Schreiben mit UTF8, versuche Standard-Encoding" -ForegroundColor Yellow
+            Set-Content -Path $LogPath -Value "# MD5 Checksum Log - $headerJson" -ErrorAction Stop
         }
         
-        Write-LogEntry "Log-Datei initialisiert: $LogPath" -Level Info
+        Write-Host "DEBUG: Log-Datei erfolgreich initialisiert" -ForegroundColor Green
         return $true
     }
     catch {
-        Write-LogEntry "Fehler beim Initialisieren der Log-Datei: $($_.Exception.Message)" -Level Error
+        Write-Host "DEBUG: Fehler in Initialize-LogFile: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "DEBUG: Fehler-Details: $($_.Exception.ToString())" -ForegroundColor Red
         return $false
     }
 }
@@ -734,11 +757,7 @@ function Read-LogEntries {
     }
     
     try {
-        if ($PSVersionTable.PSVersion.Major -ge 6) {
-            $lines = Get-Content -Path $LogPath -Encoding $script:Config.LogFileEncoding
-        } else {
-            $lines = Get-Content -Path $LogPath -Encoding UTF8
-        }
+        $lines = Get-Content -Path $LogPath -Encoding utf8
         
         foreach ($line in $lines) {
             if ([string]::IsNullOrWhiteSpace($line)) {
@@ -1186,8 +1205,16 @@ function Main {
         if (-not $LogFile) {
             $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
             $sourceName = Split-Path $SourceDir -Leaf
-            $LogFile = Join-Path (Split-Path $SourceDir -Parent) "${sourceName}_${timestamp}_${HashAlgorithm}.log"
+            # Sicherer Pfad für Log-Datei
+            $parentDir = Split-Path $SourceDir -Parent
+            if (-not $parentDir -or -not (Test-Path $parentDir)) {
+                # Fallback auf aktuelles Verzeichnis
+                $parentDir = $PWD.Path
+            }
+            $LogFile = Join-Path $parentDir "${sourceName}_${timestamp}_${HashAlgorithm}.log"
         }
+        
+        Write-Host "DEBUG: Bestimmte Log-Datei: $LogFile" -ForegroundColor Yellow
         
         $LogFile = ConvertTo-LongPath $LogFile
         $script:CurrentLogFile = $LogFile
@@ -1303,9 +1330,21 @@ function Main {
         return $true
     }
     catch {
-        Write-LogEntry "Fataler Fehler: $($_.Exception.Message)" -Level Error
-        Write-Host "Fehler: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host "Stack Trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+        $errorMessage = "Fataler Fehler: $($_.Exception.Message)"
+        $stackTrace = $_.ScriptStackTrace
+        
+        # Versuche Log-Eintrag zu schreiben
+        try {
+            Write-LogEntry $errorMessage -Level Error
+        }
+        catch {
+            # Fallback auf Console-Output wenn Logging fehlschlägt
+            Write-Host "FATAL ERROR: $errorMessage" -ForegroundColor Red
+            Write-Host "Logging failed, falling back to console output" -ForegroundColor Yellow
+        }
+        
+        Write-Host "Fehler: $errorMessage" -ForegroundColor Red
+        Write-Host "Stack Trace: $stackTrace" -ForegroundColor Red
         return $false
     }
     finally {
