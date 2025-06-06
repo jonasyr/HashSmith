@@ -57,7 +57,7 @@ HashSmith is an enterprise-grade, thread-safe checksum generator designed to com
 1. **Clone the repository:**
 
    ```powershell
-   git clone https://github.com/YourOrg/HashSmith.git
+   git clone https://github.com/jonasyr/HashSmith.git
    cd HashSmith
    ```
 
