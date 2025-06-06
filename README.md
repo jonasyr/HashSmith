@@ -1,6 +1,6 @@
 # HashSmith
 
-HashSmith is an enterprise-grade, thread-safe checksum generator designed to compute file hashes (MD5, SHA1, SHA256, SHA384, SHA512) at scale. It features parallel processing, intelligent retry mechanisms, resume functionality, “fix errors” mode, exclusion patterns, long-path support, and structured JSON logging for auditing and monitoring.
+HashSmith is an enterprise-grade, thread-safe checksum generator designed to compute file hashes (MD5, SHA256, SHA512) at scale. It features parallel processing, intelligent retry mechanisms, resume functionality, "fix errors" mode, exclusion patterns, long-path support, and structured logging for auditing and monitoring.
 
 ---
 
@@ -28,17 +28,15 @@ HashSmith is an enterprise-grade, thread-safe checksum generator designed to com
 
 * **Parallel Processing:** Utilizes multiple threads (up to CPU cores × 2 by default) for high throughput.
 * **Thread Safety:** Atomic log writes and console progress updates using mutexes.
-* **Multiple Hash Algorithms:** Supports MD5, SHA1, SHA256, SHA384, and SHA512.
-* **Robust Retry Mechanism:** Automatic exponential backoff for transient I/O or lock-related errors.
+* **Multiple Hash Algorithms:** Supports MD5, SHA256, and SHA512.
+* **Robust Retry Mechanism:** Automatic retry with exponential backoff for transient I/O errors.
 * **Resume Functionality:** Skip already processed files by analyzing an existing log.
 * **Fix Errors Mode:** Re-compute failed entries without re-hashing successful files.
 * **Exclude Patterns:** Filter out files by wildcard patterns (e.g., `*.tmp`, `*.bak`).
 * **Long Path Support:** Handles paths longer than 260 characters transparently.
-* **Structured JSON Logging:** Each entry is a single-line JSON object for easy ingestion by SIEM or log-analytics.
-* **Adaptive Batch Sizing:** Dynamically calculates optimal batch size based on total file count, total size, and thread count.
-* **Comprehensive Error Recovery:** Captures and logs any failures, providing context (file size, attempts, method).
-* **Preview Mode (`-WhatIf`):** Estimate file counts, batches, and resource usage without hashing.
-* **Silent Mode (`-Silent`):** Suppress progress bars and verbose output for automation pipelines.
+* **Optional JSON Logging:** Generate additional JSON format log alongside plain text.
+* **Comprehensive Error Recovery:** Captures and logs any failures with detailed error messages.
+* **Preview Mode (`-WhatIf`):** Estimate file counts and resource usage without hashing.
 
 ---
 
@@ -82,7 +80,7 @@ HashSmith is an enterprise-grade, thread-safe checksum generator designed to com
 * **Default Behavior:**
 
   * Uses MD5 algorithm.
-  * Creates a log file next to `C:\Data` with a timestamp.
+  * Creates a log file in the source directory with a timestamp.
   * Spawns up to `(CPU cores × 2)` parallel threads (if PowerShell 7+).
 
 ### Resume Mode
@@ -100,10 +98,10 @@ Continue a previously interrupted run without re-hashing successful files:
 Re-compute only those entries that previously failed:
 
 ```powershell
-.\HashSmith.ps1 -SourceDir "C:\Data" -LogFile "C:\Logs\data_20250606_MD5.log" -FixErrors
+.\HashSmith.ps1 -SourceDir "C:\Data" -LogFile "C:\Logs\data_MD5_20250606.log" -FixErrors
 ```
 
-* Requires a valid log at `C:\Logs\data_20250606_MD5.log`.
+* Requires a valid log at the specified path.
 * Any files that no longer exist are skipped with a warning.
 
 ### Excluding Files
@@ -118,7 +116,7 @@ Exclude certain patterns (e.g., temporary or backup files):
 
 ### Preview Mode (WhatIf)
 
-Preview how many files would be processed, estimated batches, total size, and thread configuration:
+Preview how many files would be processed and estimated total size:
 
 ```powershell
 .\HashSmith.ps1 -SourceDir "C:\Data" -WhatIf
@@ -132,19 +130,16 @@ Preview how many files would be processed, estimated batches, total size, and th
 
 | Parameter           | Type       | Required | Default                       | Description                                                                                                                |
 | ------------------- | ---------- | -------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **SourceDir**       | `string`   | Yes      | N/A                           | Path to the directory containing files to hash. Must exist and be safe (no path traversal).                                |
-| **LogFile**         | `string`   | No       | Auto-generated in parent path | Full path to the JSON log. If omitted, a file named `<folder>_<YYYYMMDD_HHMMSS>_<Algo>.log` will be created automatically. |
-| **MD5Tool**         | `string`   | No       | Auto-detected if available    | Path to an external MD5 executable. Used only when `-HashAlgorithm MD5` and file is accessible by the tool.                |
-| **HashAlgorithm**   | `string`   | No       | `MD5`                         | Hash algorithm to use. Valid options: `MD5`, `SHA1`, `SHA256`, `SHA384`, `SHA512`.                                         |
+| **SourceDir**       | `string`   | Yes      | N/A                           | Path to the directory containing files to hash. Must exist and be accessible.                                |
+| **LogFile**         | `string`   | No       | Auto-generated in source dir | Full path to the log file. If omitted, a file named `<folder>_<Algo>_<timestamp>.log` will be created automatically. |
+| **MD5Tool**         | `string`   | No       | Auto-detected if available    | Path to an external MD5 executable. Used only when `-HashAlgorithm MD5` and file is accessible.                |
+| **HashAlgorithm**   | `string`   | No       | `MD5`                         | Hash algorithm to use. Valid options: `MD5`, `SHA256`, `SHA512`.                                         |
 | **Resume**          | `switch`   | No       | `$false`                      | Skip files already successfully hashed in an existing log.                                                                 |
 | **FixErrors**       | `switch`   | No       | `$false`                      | Only re-hash previously failed entries. Requires an existing log file.                                                     |
 | **ExcludePatterns** | `string[]` | No       | `@()`                         | Wildcard patterns to exclude (e.g., `*.tmp`).                                                                              |
-| **MaxThreads**      | `int`      | No       | `(CPU cores × 2)`             | Maximum number of parallel threads. Valid range: 1 – 64.                                                                   |
-| **BatchSize**       | `int`      | No       | `0`                           | Number of files per batch. `0` means let the script compute an optimal size between 10 and 500.                            |
-| **RetryAttempts**   | `int`      | No       | `3`                           | How many times to retry transient hashing errors.                                                                          |
-| **LogLevel**        | `string`   | No       | `Info`                        | Verbosity level. Options: `Error`, `Warning`, `Info`, `Debug`.                                                             |
-| **WhatIf**          | `switch`   | No       | `$false`                      | Preview mode – calculate stats but do not process hashes.                                                                  |
-| **Silent**          | `switch`   | No       | `$false`                      | Suppress console output (logs still write to file).                                                                        |
+| **UseJsonLog**      | `switch`   | No       | `$false`                      | Generate additional JSON format log alongside plain text.                            |
+| **MaxThreads**      | `int`      | No       | `(CPU cores × 2)`             | Maximum number of parallel threads. Valid range: 1 – 128.                                                                   |
+| **RetryCount**      | `int`      | No       | `3`                           | How many times to retry transient hashing errors. Valid range: 0 – 10.                                                                          |
 
 ---
 
@@ -152,42 +147,40 @@ Preview how many files would be processed, estimated batches, total size, and th
 
 * **Log Format:**
 
-  * The first line is a header comment containing metadata in compressed JSON. E.g.:
+  * The log starts with header comments containing metadata:
 
     ```text
-    # MD5 Checksum Log - {"LogVersion":"2.0","CreatedDate":"2025-06-06 12:34:56.789","SourceDirectory":"\\?\C:\Data",…}
+    # Checksum Log Generated by Production-Ready Script v2.0.0
+    # Date: 2025-06-06 12:34:56
+    # Algorithm: MD5
+    # Source: C:\Data
     ```
-  * Every subsequent line is a compact, single-line JSON object:
+  * Every subsequent line follows the format:
 
-    ```jsonc
-    {
-      "Timestamp": "2025-06-06 12:35:00.123",
-      "Level": "Info",
-      "ThreadId": 12,
-      "ProcessId": 3456,
-      "Message": "Hash computed: report.pdf",
-      "Data": {
-        "FilePath": "\\?\\C:\\Data\\report.pdf",
-        "Hash": "5d41402abc4b2a76b9719d911017c592",
-        "Algorithm": "MD5",
-        "Success": true,
-        "Error": null,
-        "FileSize": 123456,
-        "ProcessingTime": 45,
-        "Method": "PowerShell",
-        "Attempts": 1
-      }
-    }
+    ```text
+    C:\Data\report.pdf = 5d41402abc4b2a76b9719d911017c592, size: 123456 bytes
     ```
 * **Error Entries:**
 
-  * If hashing fails, Level = `Error`, `Data.Success` is `false`, and `Data.Error` contains the exception message.
+  * If hashing fails, the format is:
+
+    ```text
+    C:\Data\locked.pdf = ERROR: The process cannot access the file, size: 123456 bytes
+    ```
 * **Resume Logic:**
 
-  * During resume, the script reads all previous successful entries (`Data.Success == true && Data.Hash != null`) and skips those file paths.
+  * During resume, the script reads all previous successful entries (those with valid hashes) and skips those file paths.
 * **FixErrors Logic:**
 
-  * The script collects all failed entries (`Data.Success == false`) and re-attempts hashing only those files.
+  * The script collects all failed entries (those with "ERROR:") and re-attempts hashing only those files.
+
+* **Total Hash:**
+
+  * At the end of a successful run, a total hash is computed from all individual hashes:
+
+    ```text
+    TotalMD5 = a1b2c3d4e5f6789012345678901234567890abcd
+    ```
 
 ---
 
@@ -196,10 +189,10 @@ Preview how many files would be processed, estimated batches, total size, and th
 1. **Generate MD5 for all files under `D:\Archives`:**
 
    ```powershell
-   .\HashSmith.ps1 -SourceDir "D:\Archives" -LogLevel Info
+   .\HashSmith.ps1 -SourceDir "D:\Archives"
    ```
 
-   * Creates `Archives_<timestamp>_MD5.log` in `D:\`.
+   * Creates `Archives_MD5_<timestamp>.log` in `D:\Archives`.
 
 2. **Use SHA256 and limit to 8 threads:**
 
@@ -207,29 +200,29 @@ Preview how many files would be processed, estimated batches, total size, and th
    .\HashSmith.ps1 -SourceDir "D:\Archives" -HashAlgorithm SHA256 -MaxThreads 8
    ```
 
-3. **Automatically detect an external MD5 tool:**
+3. **Use an external MD5 tool:**
 
    ```powershell
    # Place MD5-x64.exe in C:\Tools\
-   .\HashSmith.ps1 -SourceDir "C:\BigData" -LogFile "C:\Logs\bigdata.md5"
+   .\HashSmith.ps1 -SourceDir "C:\BigData" -MD5Tool "C:\Tools\MD5-x64.exe"
    ```
 
 4. **Resume an interrupted job:**
 
    ```powershell
-   .\HashSmith.ps1 -SourceDir "C:\BigData" -Resume -LogFile "C:\Logs\bigdata_20250605_MD5.log"
+   .\HashSmith.ps1 -SourceDir "C:\BigData" -Resume
    ```
 
-5. **Fix only failed entries using SHA1:**
+5. **Fix only failed entries using SHA512:**
 
    ```powershell
-   .\HashSmith.ps1 -SourceDir "C:\Backups" -HashAlgorithm SHA1 -LogFile "C:\Logs\backups_20250604_SHA1.log" -FixErrors
+   .\HashSmith.ps1 -SourceDir "C:\Backups" -HashAlgorithm SHA512 -LogFile "C:\Logs\backups_SHA512_20250604.log" -FixErrors
    ```
 
-6. **Exclude temporary files and run silently:**
+6. **Exclude temporary files and generate JSON log:**
 
    ```powershell
-   .\HashSmith.ps1 -SourceDir "C:\Projects" -ExcludePatterns "*.tmp","*.log" -Silent
+   .\HashSmith.ps1 -SourceDir "C:\Projects" -ExcludePatterns "*.tmp","*.log" -UseJsonLog
    ```
 
 7. **Preview without executing:**
@@ -247,29 +240,25 @@ Preview how many files would be processed, estimated batches, total size, and th
    * True parallelism (`ForEach-Object -Parallel`) only works in PowerShell Core (7.0+).
    * If running on Windows PowerShell 5.1, the script will gracefully fall back to sequential mode.
 
-2. **Choose an appropriate `BatchSize`.**
-
-   * For large numbers of tiny files (< 10 KB each), let the script compute a large batch (up to 200).
-   * For very large files (> 100 MB), use smaller batches or explicitly set `-BatchSize <n>` to avoid memory spikes.
-
-3. **Monitor `LogLevel=Debug` for troubleshooting.**
-
-   * In case of unclear failures, set `-LogLevel Debug` to capture internal retry decisions and path-conversion errors.
-
-4. **Leverage `-Resume` after interruptions.**
-
-   * If a run is canceled or the machine restarts, simply re-run with `-Resume` and the same `-LogFile`.
-   * Only new or previously failed files will be hashed.
-
-5. **Optimize resource usage.**
+2. **Monitor resource usage.**
 
    * On servers with heavy I/O, limit `-MaxThreads` to prevent disk thrashing.
-   * For SSDs or NVMe, you can safely increase threads to `(CPU cores × 2)` or more, but always monitor CPU and disk metrics.
+   * For SSDs or NVMe, you can safely increase threads to `(CPU cores × 2)` or more.
 
-6. **Archive or rotate logs.**
+3. **Leverage `-Resume` after interruptions.**
 
-   * Logs can grow quickly in large repositories. Consider rotating logs daily or after major runs.
-   * You can compress old logs (e.g., `.gz` or `.zip`) because HashSmith only needs the current log when resuming or fixing errors.
+   * If a run is canceled or the machine restarts, simply re-run with `-Resume`.
+   * Only new or previously failed files will be hashed.
+
+4. **Use `-FixErrors` for reliability.**
+
+   * After a run with errors, use `-FixErrors` to retry only the failed files.
+   * This is more efficient than re-running the entire job.
+
+5. **Archive or rotate logs.**
+
+   * Logs can grow quickly in large repositories. Consider archiving completed logs.
+   * You can compress old logs because HashSmith only needs the current log when resuming or fixing errors.
 
 ---
 
