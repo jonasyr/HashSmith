@@ -276,9 +276,3 @@ Preview how many files would be processed, estimated batches, total size, and th
 ## License
 
 This project is licensed under the [MIT License](./LICENSE). See `LICENSE` for full details.
-
----
-
-**Q1:** **In what scenarios would you prefer using an external MD5 tool over PowerShell’s built-in `Get-FileHash`?**
-**Q2:** **How would you integrate HashSmith into a CI/CD pipeline to verify artifact integrity automatically?**
-**Q3:** **If you needed to extend HashSmith to support incremental hashing based on file modification timestamps, what design changes would you propose?**
