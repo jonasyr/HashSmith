@@ -146,7 +146,7 @@ function Start-HashSmithFileProcessing {
         # Guard parallel processing behind PowerShell version check
         if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
             # Reduce max threads to prevent system overload and freezes  
-            $safeThreads = [Math]::Min($MaxThreads, [Math]::Max(2, [Environment]::ProcessorCount / 3))  # Even more conservative
+            $safeThreads = [Math]::Min($MaxThreads, [Math]::Max(2, [Environment]::ProcessorCount / 2))  # Even more conservative
             
             Write-HashSmithLog -Message "Using $safeThreads threads (reduced from $MaxThreads for system stability)" -Level INFO -Component 'PROCESS'
             
