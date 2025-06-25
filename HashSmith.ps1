@@ -408,7 +408,7 @@ function Get-NormalizedPath {
             #### v4.1 CHANGE - Correct long-UNC normalisation
             if ($normalizedPath -match '^[\\\\]{2}[^\\]+\\') {
                 # UNC path (\\server\share) - convert to \\?\UNC\server\share
-                return "\\?\UNC/" + $normalizedPath.Substring(2)
+                return "\\?\UNC\" + $normalizedPath.Substring(2)
             } else {
                 # Local path - convert to \\?\C:\path
                 return "\\?\$normalizedPath"
@@ -441,7 +441,8 @@ function Test-FileAccessible {
         $attemptCount++
         try {
             $normalizedPath = Get-NormalizedPath -Path $Path
-            $fileStream = [System.IO.File]::Open($normalizedPath, 'Open', 'Read', 'ReadWrite')
+            #### v4.1 CHANGE - Use FileShare.Read instead of ReadWrite for better locked file access
+            $fileStream = [System.IO.File]::Open($normalizedPath, 'Open', 'Read', 'Read')
             $fileStream.Close()
             
             if ($attemptCount -gt 1) {
@@ -901,7 +902,8 @@ function Get-FileHashSafe {
             $fileStream = $null
             
             try {
-                $fileStream = [System.IO.File]::OpenRead($normalizedPath)
+                #### v4.1 CHANGE - Use FileShare.Read and FileOptions.SequentialScan for better performance and locked file access
+                $fileStream = [System.IO.File]::Open($normalizedPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, 4096, [System.IO.FileOptions]::SequentialScan)
                 
                 # Use buffered reading for all files to ensure consistent behavior
                 $buffer = [byte[]]::new($Script:Config.BufferSize)
@@ -1298,19 +1300,19 @@ function Get-DirectoryIntegrityHash {
     }
     
     try {
-        # Create deterministic input by sorting files by normalized relative path
+        # Create deterministic input by sorting files with enhanced criteria
         $sortedEntries = @()
         $fileCount = 0
         $totalSize = 0
         
-        # Sort by case-insensitive relative path for maximum determinism
+        # Sort by normalized relative path and then by file size for determinism
         $sortedPaths = $FileHashes.Keys | Sort-Object { 
             $relativePath = $_
             if ($BasePath -and $_.StartsWith($BasePath)) {
                 $relativePath = $_.Substring($BasePath.Length).TrimStart('\', '/')
             }
             $relativePath.ToLowerInvariant().Replace('\', '/')
-        }
+        } | Sort-Object { $FileHashes[$_].Size }
         
         foreach ($filePath in $sortedPaths) {
             $relativePath = $filePath
@@ -1459,7 +1461,8 @@ function Start-FileProcessing {
                     do {
                         try {
                             $normalizedPath = Get-NormalizedPath -Path $Path
-                            $fileStream = [System.IO.File]::Open($normalizedPath, 'Open', 'Read', 'ReadWrite')
+                            #### v4.1 CHANGE - Use FileShare.Read for better locked file access
+                            $fileStream = [System.IO.File]::Open($normalizedPath, 'Open', 'Read', 'Read')
                             $fileStream.Close()
                             return $true
                         }
@@ -1569,7 +1572,8 @@ function Start-FileProcessing {
                     $fileStream = $null
                     
                     try {
-                        $fileStream = [System.IO.File]::OpenRead($normalizedPath)
+                        #### v4.1 CHANGE - Use FileShare.Read and FileOptions.SequentialScan for better performance
+                        $fileStream = [System.IO.File]::Open($normalizedPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, 4096, [System.IO.FileOptions]::SequentialScan)
                         $currentFileInfo = [System.IO.FileInfo]::new($normalizedPath)
                         
                         # Handle zero-byte files explicitly
