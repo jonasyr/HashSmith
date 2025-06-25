@@ -543,8 +543,6 @@ function Show-HashSmithSpinner {
     $i = 0
     
     try {
-        $host.UI.RawUI.CursorVisible = $false
-        
         while ((Get-Date) -lt $endTime) {
             $char = $chars[$i % $chars.Length]
             Write-Host "`r$char $Message" -NoNewline -ForegroundColor Yellow
@@ -554,12 +552,6 @@ function Show-HashSmithSpinner {
     }
     finally {
         Write-Host "`r$(' ' * ($Message.Length + 10))`r" -NoNewline  # Clear line
-        try {
-            $host.UI.RawUI.CursorVisible = $true
-        }
-        catch {
-            # Ignore if not supported
-        }
     }
 }
 

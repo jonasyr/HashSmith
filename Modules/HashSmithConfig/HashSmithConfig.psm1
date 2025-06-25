@@ -354,6 +354,91 @@ function Add-HashSmithStatistic {
 
 #endregion
 
+#region Configuration Functions
+
+<#
+.SYNOPSIS
+    Initializes the HashSmith configuration with default values
+
+.DESCRIPTION
+    Initializes the HashSmith configuration hashtable with default values,
+    resetting all configuration to a known state
+
+.EXAMPLE
+    Initialize-HashSmithConfig
+#>
+function Initialize-HashSmithConfig {
+    [CmdletBinding()]
+    param()
+    
+    # Reset to default configuration
+    $Script:Config = @{
+        Version = '4.1.0'
+        BufferSize = 4MB
+        MaxRetryDelay = 5000
+        ProgressInterval = 25
+        LogEncoding = [System.Text.Encoding]::UTF8
+        DateFormat = 'yyyy-MM-dd HH:mm:ss.fff'
+        SupportLongPaths = $true
+        NetworkTimeoutMs = 30000
+        IntegrityHashSize = 1KB
+        CircuitBreakerThreshold = 10
+        CircuitBreakerTimeout = 30
+        
+        # Additional runtime configuration
+        TargetPath = $null
+        Algorithm = 'MD5'
+        EnableParallelDiscovery = $true
+        MaxParallelJobs = 4
+        EnableProgressSpinner = $true
+        SpinnerThresholdMB = 50
+    }
+    
+    # Reset statistics
+    Reset-HashSmithStatistics
+    
+    # Reset circuit breaker
+    $Script:CircuitBreaker = @{
+        FailureCount = 0
+        LastFailureTime = $null
+        IsOpen = $false
+    }
+}
+
+<#
+.SYNOPSIS
+    Sets a HashSmith configuration value
+
+.DESCRIPTION
+    Sets a specific configuration value in the HashSmith configuration
+
+.PARAMETER Key
+    The configuration key to set
+
+.PARAMETER Value
+    The value to set for the configuration key
+
+.EXAMPLE
+    Set-HashSmithConfig -Key 'TargetPath' -Value 'C:\temp'
+
+.EXAMPLE
+    Set-HashSmithConfig -Key 'Algorithm' -Value 'SHA256'
+#>
+function Set-HashSmithConfig {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Key,
+        
+        [Parameter(Mandatory)]
+        $Value
+    )
+    
+    $Script:Config[$Key] = $Value
+}
+
+#endregion
+
 # Export public functions
 Export-ModuleMember -Function @(
     'Get-HashSmithConfig',
@@ -368,7 +453,8 @@ Export-ModuleMember -Function @(
     'Initialize-HashSmithConfig',
     'Reset-HashSmithStatistics',
     'Set-HashSmithStatistic',
-    'Add-HashSmithStatistic'
+    'Add-HashSmithStatistic',
+    'Set-HashSmithConfig'
 )
 
 # Export variables that need to be accessible

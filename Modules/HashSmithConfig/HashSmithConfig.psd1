@@ -9,6 +9,7 @@
     PowerShellVersion = '5.1'
     FunctionsToExport = @(
         'Get-HashSmithConfig',
+        'Set-HashSmithConfig',
         'Get-HashSmithStatistics',
         'Get-HashSmithCircuitBreaker',
         'Get-HashSmithExitCode',
