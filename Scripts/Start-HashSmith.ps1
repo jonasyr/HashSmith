@@ -530,7 +530,20 @@ try {
         Write-Host "🔐 Computing directory integrity hash..." -ForegroundColor Cyan
         
         # Include existing processed files for complete directory hash
-        $allFileHashes = $fileHashes.Clone()
+        $allFileHashes = @{}
+        
+        # Add newly processed files
+        if ($fileHashes -is [array]) {
+            foreach ($fileHash in $fileHashes) {
+                if ($fileHash -and $fileHash.Path) {
+                    $allFileHashes[$fileHash.Path] = $fileHash
+                }
+            }
+        } elseif ($fileHashes -is [hashtable]) {
+            $allFileHashes = $fileHashes.Clone()
+        }
+        
+        # Add existing processed files for complete directory hash
         foreach ($processedFile in $existingEntries.Processed.Keys) {
             $absolutePath = if ([System.IO.Path]::IsPathRooted($processedFile)) { 
                 $processedFile 
