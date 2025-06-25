@@ -149,7 +149,7 @@ function Get-HashSmithFileHashSafe {
             
             try {
                 # Use FileShare.Read and FileOptions.SequentialScan for better performance and locked file access
-                $fileStream = [System.IO.File]::Open($normalizedPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, 4096, [System.IO.FileOptions]::SequentialScan)
+                $fileStream = [System.IO.FileStream]::new($normalizedPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, 4096, [System.IO.FileOptions]::SequentialScan)
                 
                 # Use buffered reading for all files to ensure consistent behavior
                 $buffer = [byte[]]::new($config.BufferSize)

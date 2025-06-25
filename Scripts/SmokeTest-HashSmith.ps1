@@ -118,42 +118,66 @@ try {
     Write-Host "HashSmith execution completed in $($Duration.TotalSeconds) seconds." -ForegroundColor Green
     Write-Host ""
 
-    # Verify output files
+    # Verify output files (updated for refactored script)
     Write-Host "Verifying output files..." -ForegroundColor Green
     
-    $ExpectedOutputs = @(
-        'HashSmith_Results.csv',
-        'HashSmith_Log.txt',
-        'HashSmith_Summary.txt',
-        'HashSmith_DirectoryIntegrity.txt'
-    )
-
+    # Look for actual generated files (timestamp-based log files)
+    $LogFiles = Get-ChildItem $TestPath -Filter "*.log" | Where-Object { $_.Name -like "*MD5*" }
+    $JsonFiles = Get-ChildItem $TestPath -Filter "*.json" | Where-Object { $_.Name -like "*MD5*" }
+    
     $AllOutputsFound = $true
-    foreach ($Output in $ExpectedOutputs) {
-        $OutputPath = Join-Path $TestPath $Output
-        if (Test-Path $OutputPath) {
-            $FileSize = (Get-Item $OutputPath).Length
-            Write-Host "✓ $Output found ($FileSize bytes)" -ForegroundColor Green
+    $FilesFound = 0
+    
+    # Check for main log file
+    if ($LogFiles.Count -gt 0) {
+        $LogFile = $LogFiles[0]
+        $FileSize = $LogFile.Length
+        Write-Host "✓ Hash log file found: $($LogFile.Name) ($FileSize bytes)" -ForegroundColor Green
+        $FilesFound++
+        
+        # Basic content validation for log file
+        if ($FileSize -gt 0) {
+            $LogContent = Get-Content $LogFile.FullName -First 10
+            $HasHeader = $LogContent | Where-Object { $_ -like "# File Integrity Log*" }
+            $HasHashEntries = $LogContent | Where-Object { $_ -like "*=*,*Size:*,*Modified:*" }
             
-            # Basic content validation
-            if ($Output -eq 'HashSmith_Results.csv' -and $FileSize -gt 0) {
-                $CsvContent = Get-Content $OutputPath -First 5
-                if ($CsvContent[0] -like "*FileName*Hash*") {
-                    Write-Host "  ✓ CSV header looks correct" -ForegroundColor DarkGreen
-                } else {
-                    Write-Host "  ⚠ CSV header format unexpected" -ForegroundColor Yellow
-                }
+            if ($HasHeader) {
+                Write-Host "  ✓ Log file header looks correct" -ForegroundColor DarkGreen
+            } else {
+                Write-Host "  ⚠ Log file header format unexpected" -ForegroundColor Yellow
             }
-        } else {
-            Write-Host "✗ $Output NOT found" -ForegroundColor Red
-            $AllOutputsFound = $false
+            
+            if ($HasHashEntries) {
+                Write-Host "  ✓ Log file contains hash entries" -ForegroundColor DarkGreen
+            } else {
+                Write-Host "  ⚠ Log file contains no hash entries" -ForegroundColor Yellow
+            }
         }
+    } else {
+        Write-Host "✗ Hash log file NOT found (expected *MD5*.log)" -ForegroundColor Red
+        $AllOutputsFound = $false
+    }
+    
+    # Check for JSON log file (optional)
+    if ($JsonFiles.Count -gt 0) {
+        $JsonFile = $JsonFiles[0]
+        $FileSize = $JsonFile.Length
+        Write-Host "✓ JSON log file found: $($JsonFile.Name) ($FileSize bytes)" -ForegroundColor Green
+        $FilesFound++
+    }
+    
+    # Check that some test files were actually processed
+    if ($LogFiles.Count -gt 0 -and $LogFiles[0].Length -gt 1000) {
+        Write-Host "✓ Log file size indicates files were processed" -ForegroundColor Green
+    } else {
+        Write-Host "⚠ Log file seems small - files may not have been processed successfully" -ForegroundColor Yellow
     }
 
     Write-Host ""
     if ($AllOutputsFound) {
         Write-Host "=== SMOKE TEST PASSED ===" -ForegroundColor Green
         Write-Host "All expected output files were generated successfully." -ForegroundColor Green
+        Write-Host "Files found: $FilesFound" -ForegroundColor Green
     } else {
         Write-Host "=== SMOKE TEST FAILED ===" -ForegroundColor Red
         Write-Host "Some expected output files were missing." -ForegroundColor Red
@@ -164,7 +188,7 @@ try {
     Write-Host "Test Summary:" -ForegroundColor Cyan
     Write-Host "- Test files created: $($TestFiles.Count)" -ForegroundColor White
     Write-Host "- Execution time: $($Duration.TotalSeconds) seconds" -ForegroundColor White
-    Write-Host "- Output files found: $($ExpectedOutputs.Where({Test-Path (Join-Path $TestPath $_)}).Count)/$($ExpectedOutputs.Count)" -ForegroundColor White
+    Write-Host "- Output files found: $FilesFound" -ForegroundColor White
 
 } catch {
     Write-Host ""
