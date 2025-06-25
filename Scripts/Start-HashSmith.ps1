@@ -524,8 +524,23 @@ try {
     
     $fileHashes = Start-HashSmithFileProcessing -Files $filesToProcess -LogPath $LogFile -Algorithm $HashAlgorithm -ExistingEntries $existingEntries -BasePath $SourceDir -StrictMode:$StrictMode -VerifyIntegrity:$VerifyIntegrity -MaxThreads $MaxThreads -ChunkSize $ChunkSize -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -ShowProgress:$ShowProgress -UseParallel:$useParallel
     
+    # Handle both hashtable and array returns from the processor
+    $actualFileHashes = if ($fileHashes -is [hashtable]) {
+        $fileHashes
+    } elseif ($fileHashes -is [array] -and $fileHashes.Count -gt 0) {
+        # Find the hashtable in the array (it should be the last item)
+        $hashtableItem = $fileHashes | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
+        if ($hashtableItem) {
+            $hashtableItem
+        } else {
+            @{}
+        }
+    } else {
+        @{}
+    }
+    
     # Compute enhanced directory integrity hash
-    if (-not $FixErrors -and $fileHashes.Count -gt 0) {
+    if (-not $FixErrors -and $actualFileHashes.Count -gt 0) {
         Write-Host ""
         Write-Host "🔐 Computing directory integrity hash..." -ForegroundColor Cyan
         
@@ -533,14 +548,8 @@ try {
         $allFileHashes = @{}
         
         # Add newly processed files
-        if ($fileHashes -is [array]) {
-            foreach ($fileHash in $fileHashes) {
-                if ($fileHash -and $fileHash.Path) {
-                    $allFileHashes[$fileHash.Path] = $fileHash
-                }
-            }
-        } elseif ($fileHashes -is [hashtable]) {
-            $allFileHashes = $fileHashes.Clone()
+        foreach ($key in $actualFileHashes.Keys) {
+            $allFileHashes[$key] = $actualFileHashes[$key]
         }
         
         # Add existing processed files for complete directory hash

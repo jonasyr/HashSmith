@@ -443,7 +443,8 @@ function Start-HashSmithFileProcessing {
     Write-HashSmithLog -Message "Total bytes processed: $('{0:N2} GB' -f ($totalBytes / 1GB))" -Level INFO -Component 'PROCESS'
     Write-HashSmithLog -Message "Average throughput: $('{0:N1} MB/s' -f $throughputMBps)" -Level INFO -Component 'PROCESS'
     
-    return $fileHashes
+    # Ensure we return only the hashtable, not an array
+    return ,$fileHashes
 }
 
 #endregion
