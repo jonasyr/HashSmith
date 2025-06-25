@@ -18,7 +18,9 @@
         'Get-HashSmithStructuredLogs',
         'Add-HashSmithStructuredLog',
         'Initialize-HashSmithConfig',
-        'Reset-HashSmithStatistics'
+        'Reset-HashSmithStatistics',
+        'Set-HashSmithStatistic',
+        'Add-HashSmithStatistic'
     )
     VariablesToExport = @(
         'Config',

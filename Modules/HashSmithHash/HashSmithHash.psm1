@@ -81,7 +81,6 @@ function Get-HashSmithFileHashSafe {
     
     $startTime = Get-Date
     $config = Get-HashSmithConfig
-    $stats = Get-HashSmithStatistics
     
     # Pre-process integrity check
     if ($StrictMode -or $VerifyIntegrity) {
@@ -131,7 +130,7 @@ function Get-HashSmithFileHashSafe {
                 $currentSnapshot = Get-HashSmithFileIntegritySnapshot -Path $normalizedPath
                 if (-not (Test-HashSmithFileIntegrityMatch -Snapshot1 $PreIntegritySnapshot -Snapshot2 $currentSnapshot)) {
                     $result.RaceConditionDetected = $true
-                    $stats.FilesRaceCondition++
+                    Add-HashSmithStatistic -Name 'FilesRaceCondition' -Amount 1
                     
                     if ($StrictMode) {
                         throw [System.InvalidOperationException]::new("File modified between discovery and processing (race condition detected)")
@@ -146,14 +145,23 @@ function Get-HashSmithFileHashSafe {
             # Compute hash using streaming approach
             $hashAlgorithm = [System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)
             $fileStream = $null
+            $showSpinner = $currentFileInfo.Length -gt (50MB)  # Show spinner for files larger than 50MB
             
             try {
+                # Start spinner for large files
+                if ($showSpinner) {
+                    $fileName = [System.IO.Path]::GetFileName($Path)
+                    $sizeText = "$('{0:N1} MB' -f ($currentFileInfo.Length / 1MB))"
+                    Start-HashSmithSpinner -Message "Processing large file: $fileName ($sizeText)"
+                }
+                
                 # Use FileShare.Read and FileOptions.SequentialScan for better performance and locked file access
                 $fileStream = [System.IO.FileStream]::new($normalizedPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, 4096, [System.IO.FileOptions]::SequentialScan)
                 
                 # Use buffered reading for all files to ensure consistent behavior
                 $buffer = [byte[]]::new($config.BufferSize)
                 $totalRead = 0
+                $lastSpinnerUpdate = Get-Date
                 
                 # Initialize hash computation
                 if ($currentFileInfo.Length -eq 0) {
@@ -175,6 +183,15 @@ function Get-HashSmithFileHashSafe {
                         
                         $totalRead += $bytesRead
                         
+                        # Update spinner message for very large files
+                        if ($showSpinner -and ((Get-Date) - $lastSpinnerUpdate).TotalSeconds -ge 2) {
+                            $progress = ($totalRead / $currentFileInfo.Length) * 100
+                            $fileName = [System.IO.Path]::GetFileName($Path)
+                            $sizeText = "$('{0:N1} MB' -f ($currentFileInfo.Length / 1MB))"
+                            Update-HashSmithSpinner -Message "Processing large file: $fileName ($sizeText) - $($progress.ToString('F1'))%"
+                            $lastSpinnerUpdate = Get-Date
+                        }
+                        
                         # Verify we haven't read more than expected (corruption detection)
                         if ($totalRead -gt $currentFileInfo.Length) {
                             throw [System.InvalidDataException]::new("Read more bytes than file size indicates - possible corruption")
@@ -182,6 +199,11 @@ function Get-HashSmithFileHashSafe {
                     }
                     
                     $hashBytes = $hashAlgorithm.Hash
+                }
+                
+                # Stop spinner
+                if ($showSpinner) {
+                    Stop-HashSmithSpinner
                 }
                 
                 $result.Hash = [System.BitConverter]::ToString($hashBytes) -replace '-', ''
@@ -201,6 +223,9 @@ function Get-HashSmithFileHashSafe {
                 break
                 
             } finally {
+                if ($showSpinner) {
+                    Stop-HashSmithSpinner
+                }
                 if ($fileStream) { $fileStream.Dispose() }
                 if ($hashAlgorithm) { $hashAlgorithm.Dispose() }
             }
@@ -209,38 +234,38 @@ function Get-HashSmithFileHashSafe {
         catch [System.IO.FileNotFoundException] {
             $result.Error = $_.Exception.Message
             $result.ErrorCategory = 'FileNotFound'
-            $stats.NonRetriableErrors++
+            Add-HashSmithStatistic -Name 'NonRetriableErrors' -Amount 1
             break  # Don't retry for file not found
         }
         catch [System.IO.DirectoryNotFoundException] {
             $result.Error = $_.Exception.Message
             $result.ErrorCategory = 'DirectoryNotFound'
-            $stats.NonRetriableErrors++
+            Add-HashSmithStatistic -Name 'NonRetriableErrors' -Amount 1
             break  # Don't retry for directory not found
         }
         catch [System.InvalidOperationException] {
             $result.Error = $_.Exception.Message
             $result.ErrorCategory = 'Integrity'
-            $stats.NonRetriableErrors++
+            Add-HashSmithStatistic -Name 'NonRetriableErrors' -Amount 1
             break  # Don't retry for integrity violations
         }
         catch [System.UnauthorizedAccessException] {
             $result.Error = $_.Exception.Message
             $result.ErrorCategory = 'AccessDenied'
-            $stats.NonRetriableErrors++
+            Add-HashSmithStatistic -Name 'NonRetriableErrors' -Amount 1
             break  # Don't retry for access denied
         }
         catch [System.IO.IOException] {
             $result.Error = $_.Exception.Message
             $result.ErrorCategory = 'IO'
-            $stats.RetriableErrors++
+            Add-HashSmithStatistic -Name 'RetriableErrors' -Amount 1
             Write-HashSmithLog -Message "I/O error during hash computation (attempt $attempt): $($_.Exception.Message)" -Level WARN -Component 'HASH'
             Update-HashSmithCircuitBreaker -IsFailure:$true -Component 'HASH'
         }
         catch {
             $result.Error = $_.Exception.Message
             $result.ErrorCategory = 'Unknown'
-            $stats.RetriableErrors++
+            Add-HashSmithStatistic -Name 'RetriableErrors' -Amount 1
             Write-HashSmithLog -Message "Unexpected error during hash computation (attempt $attempt): $($_.Exception.Message)" -Level WARN -Component 'HASH'
             Update-HashSmithCircuitBreaker -IsFailure:$true -Component 'HASH'
         }

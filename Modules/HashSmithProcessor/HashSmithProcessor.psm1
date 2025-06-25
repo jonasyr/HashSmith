@@ -234,11 +234,11 @@ function Start-HashSmithFileProcessing {
                 }
                 
                 $totalBytes += $result.Size
-                $stats.FilesProcessed++
-                $stats.BytesProcessed += $result.Size
+                Add-HashSmithStatistic -Name 'FilesProcessed' -Amount 1
+                Add-HashSmithStatistic -Name 'BytesProcessed' -Amount $result.Size
                 
                 if ($result.RaceConditionDetected) {
-                    $stats.FilesRaceCondition++
+                    Add-HashSmithStatistic -Name 'FilesRaceCondition' -Amount 1
                 }
             } else {
                 # Write error to log with error handling
@@ -250,31 +250,29 @@ function Start-HashSmithFileProcessing {
                 }
                 
                 $errorCount++
-                $stats.FilesError++
+                Add-HashSmithStatistic -Name 'FilesError' -Amount 1
                 
                 # Categorize errors
                 if ($result.ErrorCategory -in @('IO', 'Unknown')) {
-                    $stats.RetriableErrors++
+                    Add-HashSmithStatistic -Name 'RetriableErrors' -Amount 1
                 } else {
-                    $stats.NonRetriableErrors++
+                    Add-HashSmithStatistic -Name 'NonRetriableErrors' -Amount 1
                 }
             }
             
-            # Update progress with enhanced display
-            if ($ShowProgress -and ((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 2) {
+            # Update progress with enhanced single-line display
+            if ($ShowProgress -and ((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 1) {
                 $percent = [Math]::Round(($processedCount / $Files.Count) * 100, 1)
-                $progressBar = "█" * [Math]::Floor($percent / 2) + "░" * (50 - [Math]::Floor($percent / 2))
                 
-                $throughput = if ($totalBytes -gt 0) { " • $('{0:N1} MB/s' -f (($totalBytes / 1MB) / ((Get-Date) - $stats.StartTime).TotalSeconds))" } else { "" }
+                $throughput = if ($totalBytes -gt 0) { ($totalBytes / 1MB) / ((Get-Date) - $stats.StartTime).TotalSeconds } else { 0 }
                 $eta = if ($percent -gt 0) { 
                     $elapsed = ((Get-Date) - $stats.StartTime).TotalSeconds
                     $remaining = ($elapsed / $percent) * (100 - $percent)
-                    " • ETA: $('{0:N0}s' -f $remaining)"
-                } else { "" }
+                    if ($remaining -gt 60) { "$([Math]::Floor($remaining / 60))m $([Math]::Floor($remaining % 60))s" } else { "$([Math]::Floor($remaining))s" }
+                } else { "calculating..." }
                 
-                Write-Host "`r⚡ Processing: [" -NoNewline -ForegroundColor Magenta
-                Write-Host $progressBar -NoNewline -ForegroundColor $(if($percent -lt 50){'Yellow'}elseif($percent -lt 80){'Cyan'}else{'Green'})
-                Write-Host "] $percent% ($processedCount/$($Files.Count))$throughput$eta" -NoNewline -ForegroundColor White
+                $progressMessage = "⚡ Processing: $($processedCount)/$($Files.Count) files ($($percent)%) | $($throughput.ToString('F1')) MB/s | ETA: $eta | Errors: $errorCount"
+                Write-Host "`r$progressMessage" -NoNewline -ForegroundColor Green
                 
                 $lastProgressUpdate = Get-Date
             }
@@ -295,12 +293,14 @@ function Start-HashSmithFileProcessing {
     Clear-HashSmithLogBatch -LogPath $LogPath
     
     if ($ShowProgress) {
-        Write-Host "`r" + " " * 120 + "`r" -NoNewline  # Clear progress line
+        Write-Host "`r$(' ' * 120)`r" -NoNewline  # Clear progress line
+        Write-Host "✅ File processing completed!" -ForegroundColor Green
     }
     
     Write-HashSmithLog -Message "Enhanced file processing completed" -Level SUCCESS -Component 'PROCESS'
     Write-HashSmithLog -Message "Files processed successfully: $($processedCount - $errorCount)" -Level INFO -Component 'PROCESS'
     Write-HashSmithLog -Message "Files failed: $errorCount" -Level INFO -Component 'PROCESS'
+    $stats = Get-HashSmithStatistics  # Get fresh statistics
     Write-HashSmithLog -Message "Race conditions detected: $($stats.FilesRaceCondition)" -Level INFO -Component 'PROCESS'
     Write-HashSmithLog -Message "Total bytes processed: $('{0:N2} GB' -f ($totalBytes / 1GB))" -Level INFO -Component 'PROCESS'
     Write-HashSmithLog -Message "Average throughput: $('{0:N1} MB/s' -f (($totalBytes / 1MB) / ((Get-Date) - $stats.StartTime).TotalSeconds))" -Level INFO -Component 'PROCESS'

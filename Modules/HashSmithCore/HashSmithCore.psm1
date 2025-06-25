@@ -513,6 +513,106 @@ function Test-HashSmithFileIntegrityMatch {
 
 #endregion
 
+#region Spinner Functionality
+
+# Script-level variable for spinner state
+$Script:SpinnerRunning = $false
+$Script:SpinnerJob = $null
+
+<#
+.SYNOPSIS
+    Starts a visual spinner for long-running operations
+
+.DESCRIPTION
+    Displays a rotating spinner with custom message to indicate the script is working
+
+.PARAMETER Message
+    The message to display with the spinner
+
+.PARAMETER SpinnerChars
+    Array of characters to use for the spinner animation
+
+.EXAMPLE
+    Start-HashSmithSpinner -Message "Processing large file..."
+#>
+function Start-HashSmithSpinner {
+    [CmdletBinding()]
+    param(
+        [string]$Message = "Processing...",
+        [string[]]$SpinnerChars = @('|', '/', '-', '\')
+    )
+    
+    # Stop any existing spinner
+    Stop-HashSmithSpinner
+    
+    $Script:SpinnerRunning = $true
+    
+    # Create a background runspace for the spinner
+    $Script:SpinnerJob = Start-Job -ScriptBlock {
+        param($msg, $chars)
+        
+        $i = 0
+        while ($true) {
+            $char = $chars[$i % $chars.Length]
+            Write-Host "`r$char $msg" -NoNewline -ForegroundColor Yellow
+            Start-Sleep -Milliseconds 150
+            $i++
+        }
+    } -ArgumentList $Message, $SpinnerChars
+}
+
+<#
+.SYNOPSIS
+    Stops the visual spinner
+
+.DESCRIPTION
+    Stops the running spinner and clears the spinner line
+
+.EXAMPLE
+    Stop-HashSmithSpinner
+#>
+function Stop-HashSmithSpinner {
+    [CmdletBinding()]
+    param()
+    
+    if ($Script:SpinnerJob) {
+        Stop-Job -Job $Script:SpinnerJob -ErrorAction SilentlyContinue
+        Remove-Job -Job $Script:SpinnerJob -Force -ErrorAction SilentlyContinue
+        $Script:SpinnerJob = $null
+    }
+    
+    if ($Script:SpinnerRunning) {
+        Write-Host "`r$(' ' * 80)`r" -NoNewline  # Clear the spinner line
+        $Script:SpinnerRunning = $false
+    }
+}
+
+<#
+.SYNOPSIS
+    Updates the spinner message
+
+.DESCRIPTION
+    Updates the message displayed with the spinner without stopping/starting
+
+.PARAMETER Message
+    The new message to display
+
+.EXAMPLE
+    Update-HashSmithSpinner -Message "Processing step 2..."
+#>
+function Update-HashSmithSpinner {
+    [CmdletBinding()]
+    param(
+        [string]$Message = "Processing..."
+    )
+    
+    if ($Script:SpinnerRunning) {
+        Stop-HashSmithSpinner
+        Start-HashSmithSpinner -Message $Message
+    }
+}
+
+#endregion
 # Export public functions
 Export-ModuleMember -Function @(
     'Write-HashSmithLog',
@@ -523,5 +623,8 @@ Export-ModuleMember -Function @(
     'Test-HashSmithFileAccessible',
     'Test-HashSmithSymbolicLink',
     'Get-HashSmithFileIntegritySnapshot',
-    'Test-HashSmithFileIntegrityMatch'
+    'Test-HashSmithFileIntegrityMatch',
+    'Start-HashSmithSpinner',
+    'Stop-HashSmithSpinner',
+    'Update-HashSmithSpinner'
 )

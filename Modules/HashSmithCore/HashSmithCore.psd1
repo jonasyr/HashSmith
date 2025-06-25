@@ -16,7 +16,10 @@
         'Test-HashSmithFileAccessible',
         'Test-HashSmithSymbolicLink',
         'Get-HashSmithFileIntegritySnapshot',
-        'Test-HashSmithFileIntegrityMatch'
+        'Test-HashSmithFileIntegrityMatch',
+        'Start-HashSmithSpinner',
+        'Stop-HashSmithSpinner',
+        'Update-HashSmithSpinner'
     )
     VariablesToExport = @()
     CmdletsToExport = @()

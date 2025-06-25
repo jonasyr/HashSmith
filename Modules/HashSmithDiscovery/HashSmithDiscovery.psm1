@@ -92,92 +92,225 @@ function Get-HashSmithAllFiles {
         
         Write-HashSmithLog -Message "Using .NET Directory.EnumerateFiles for memory-efficient discovery" -Level DEBUG -Component 'DISCOVERY'
         
-        # Enumerate files in streaming fashion to reduce memory usage
-        $fileEnumerator = [System.IO.Directory]::EnumerateFiles($normalizedPath, '*', $enumOptions)
-        $processedCount = 0
-        $skippedCount = 0
-        $lastProgressUpdate = Get-Date
-        
-        foreach ($filePath in $fileEnumerator) {
+        # Use parallel discovery if PowerShell 7+ is available
+        if ($PSVersionTable.PSVersion.Major -ge 7 -and -not $StrictMode) {
+            Write-HashSmithLog -Message "Using parallel file discovery (PowerShell 7+)" -Level INFO -Component 'DISCOVERY'
+            
+            # First, get all directories for parallel processing
+            $directories = @($normalizedPath)
             try {
-                # Progress reporting every 2 seconds
-                if (((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 2) {
-                    Write-HashSmithLog -Message "Discovery progress: $processedCount files found, $skippedCount skipped" -Level PROGRESS -Component 'DISCOVERY'
-                    $lastProgressUpdate = Get-Date
-                }
+                $directories += [System.IO.Directory]::EnumerateDirectories($normalizedPath, '*', [System.IO.SearchOption]::AllDirectories)
+            } catch {
+                Write-HashSmithLog -Message "Error enumerating directories: $($_.Exception.Message)" -Level WARN -Component 'DISCOVERY'
+            }
+            
+            Write-HashSmithLog -Message "📁 Found $($directories.Count) directories to scan" -Level INFO -Component 'DISCOVERY'
+            
+            # Process directories in parallel to discover files
+            $processedCount = 0
+            $skippedCount = 0
+            $directoryIndex = 0
+            
+            $allFileResults = $directories | ForEach-Object -Parallel {
+                $directory = $_
+                $localFiles = @()
+                $localErrors = @()
+                $localSkipped = 0
+                $localSymlinks = 0
                 
-                # Check for discovery timeout
-                if (((Get-Date) - $discoveryStart).TotalMinutes -gt $timeoutMinutes) {
-                    Write-HashSmithLog -Message "Discovery timeout reached ($timeoutMinutes minutes), stopping enumeration" -Level WARN -Component 'DISCOVERY'
-                    break
-                }
+                # Import variables into parallel runspace
+                $IncludeHidden = $using:IncludeHidden
+                $IncludeSymlinks = $using:IncludeSymlinks
+                $ExcludePatterns = $using:ExcludePatterns
                 
-                # Check circuit breaker periodically
-                if ($processedCount % 1000 -eq 0 -and -not (Test-HashSmithCircuitBreaker -Component 'DISCOVERY')) {
-                    Write-HashSmithLog -Message "Discovery halted due to circuit breaker" -Level ERROR -Component 'DISCOVERY'
-                    break
-                }
-                
-                $fileInfo = [System.IO.FileInfo]::new($filePath)
-                
-                # Handle symbolic links
-                $isSymlink = Test-HashSmithSymbolicLink -Path $filePath
-                if ($isSymlink) {
-                    $symlinkCount++
-                    if (-not $IncludeSymlinks) {
-                        $skippedCount++
-                        Write-HashSmithLog -Message "Skipped symbolic link: $($fileInfo.Name)" -Level DEBUG -Component 'DISCOVERY'
-                        continue
+                try {
+                    # Create enumeration options for this directory
+                    $localEnumOptions = [System.IO.EnumerationOptions]::new()
+                    $localEnumOptions.RecurseSubdirectories = $false  # Only process current directory
+                    $localEnumOptions.IgnoreInaccessible = $false
+                    $localEnumOptions.ReturnSpecialDirectories = $false
+                    $localEnumOptions.AttributesToSkip = if ($IncludeHidden) { 
+                        [System.IO.FileAttributes]::None 
+                    } else { 
+                        [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+                    }
+                    
+                    # Enumerate files in this directory only
+                    $fileEnumerator = [System.IO.Directory]::EnumerateFiles($directory, '*', $localEnumOptions)
+                    
+                    foreach ($filePath in $fileEnumerator) {
+                        try {
+                            $fileInfo = [System.IO.FileInfo]::new($filePath)
+                            
+                            # Check if it's a symbolic link (simplified check)
+                            $isSymlink = ($fileInfo.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint
+                            if ($isSymlink) {
+                                $localSymlinks++
+                                if (-not $IncludeSymlinks) {
+                                    $localSkipped++
+                                    continue
+                                }
+                            }
+                            
+                            # Apply exclusion patterns
+                            $shouldExclude = $false
+                            foreach ($pattern in $ExcludePatterns) {
+                                if ($fileInfo.Name -like $pattern -or $fileInfo.FullName -like $pattern) {
+                                    $shouldExclude = $true
+                                    $localSkipped++
+                                    break
+                                }
+                            }
+                            
+                            if (-not $shouldExclude) {
+                                $localFiles += $fileInfo
+                            }
+                        }
+                        catch {
+                            $localErrors += @{
+                                Path = $filePath
+                                Error = $_.Exception.Message
+                                Timestamp = Get-Date
+                                Category = 'FileAccess'
+                            }
+                        }
+                    }
+                } catch {
+                    $localErrors += @{
+                        Path = $directory
+                        Error = $_.Exception.Message
+                        Timestamp = Get-Date
+                        Category = 'DirectoryAccess'
                     }
                 }
                 
-                # Apply exclusion patterns
-                $shouldExclude = $false
-                foreach ($pattern in $ExcludePatterns) {
-                    if ($fileInfo.Name -like $pattern -or $fileInfo.FullName -like $pattern) {
-                        $shouldExclude = $true
-                        $skippedCount++
-                        Write-HashSmithLog -Message "Excluded by pattern '$pattern': $($fileInfo.Name)" -Level DEBUG -Component 'DISCOVERY'
+                return @{
+                    Files = $localFiles
+                    Errors = $localErrors
+                    Skipped = $localSkipped
+                    Symlinks = $localSymlinks
+                    Directory = $directory
+                }
+            } -ThrottleLimit ([Environment]::ProcessorCount)
+            
+            # Combine results from parallel processing
+            foreach ($result in $allFileResults) {
+                $directoryIndex++
+                
+                foreach ($file in $result.Files) {
+                    $allFiles.Add($file)
+                }
+                
+                foreach ($error in $result.Errors) {
+                    $errors.Add($error)
+                }
+                
+                $processedCount += $result.Files.Count
+                $skippedCount += $result.Skipped
+                $symlinkCount += $result.Symlinks
+                
+                # Update progress every few directories with overwrite capability
+                if ($directoryIndex % 10 -eq 0 -or $directoryIndex -eq $directories.Count) {
+                    $progressMessage = "🔍 Discovered: $processedCount files | Skipped: $skippedCount | Dirs: $directoryIndex/$($directories.Count)"
+                    Write-Host "`r$progressMessage" -NoNewline -ForegroundColor Cyan
+                }
+            }
+            
+            # Clear the progress line
+            Write-Host "`r$(' ' * 120)`r" -NoNewline
+            
+        } else {
+            # Use sequential discovery for PowerShell 5.1 or strict mode
+            Write-HashSmithLog -Message "Using sequential file discovery" -Level INFO -Component 'DISCOVERY'
+            
+            # Enumerate files in streaming fashion to reduce memory usage
+            $fileEnumerator = [System.IO.Directory]::EnumerateFiles($normalizedPath, '*', $enumOptions)
+            $processedCount = 0
+            $skippedCount = 0
+            $lastProgressUpdate = Get-Date
+            
+            foreach ($filePath in $fileEnumerator) {
+                try {
+                    # Progress reporting with overwrite capability
+                    if (((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 1) {
+                        $progressMessage = "🔍 Discovering files: $processedCount found | $skippedCount skipped"
+                        Write-Host "`r$progressMessage" -NoNewline -ForegroundColor Cyan
+                        $lastProgressUpdate = Get-Date
+                    }
+                    
+                    # Check for discovery timeout
+                    if (((Get-Date) - $discoveryStart).TotalMinutes -gt $timeoutMinutes) {
+                        Write-Host "`r$(' ' * 80)`r" -NoNewline  # Clear progress line
+                        Write-HashSmithLog -Message "Discovery timeout reached ($timeoutMinutes minutes), stopping enumeration" -Level WARN -Component 'DISCOVERY'
                         break
                     }
-                }
-                
-                if (-not $shouldExclude) {
-                    # Strict mode validation
-                    if ($StrictMode) {
-                        # Verify file is still accessible
-                        if (-not (Test-Path -LiteralPath $fileInfo.FullName)) {
-                            Write-HashSmithLog -Message "File disappeared during discovery: $($fileInfo.Name)" -Level WARN -Component 'DISCOVERY'
+                    
+                    # Check circuit breaker periodically
+                    if ($processedCount % 1000 -eq 0 -and -not (Test-HashSmithCircuitBreaker -Component 'DISCOVERY')) {
+                        Write-Host "`r$(' ' * 80)`r" -NoNewline  # Clear progress line
+                        Write-HashSmithLog -Message "Discovery halted due to circuit breaker" -Level ERROR -Component 'DISCOVERY'
+                        break
+                    }
+                    
+                    $fileInfo = [System.IO.FileInfo]::new($filePath)
+                    
+                    # Handle symbolic links
+                    $isSymlink = Test-HashSmithSymbolicLink -Path $filePath
+                    if ($isSymlink) {
+                        $symlinkCount++
+                        if (-not $IncludeSymlinks) {
+                            $skippedCount++
+                            Write-HashSmithLog -Message "Skipped symbolic link: $($fileInfo.Name)" -Level DEBUG -Component 'DISCOVERY'
                             continue
                         }
-                        
-                        # Get integrity snapshot for later verification
-                        $snapshot = Get-HashSmithFileIntegritySnapshot -Path $fileInfo.FullName
-                        if ($snapshot) {
-                            Add-Member -InputObject $fileInfo -NotePropertyName 'IntegritySnapshot' -NotePropertyValue $snapshot
+                    }
+                    
+                    # Apply exclusion patterns
+                    $shouldExclude = $false
+                    foreach ($pattern in $ExcludePatterns) {
+                        if ($fileInfo.Name -like $pattern -or $fileInfo.FullName -like $pattern) {
+                            $shouldExclude = $true
+                            $skippedCount++
+                            Write-HashSmithLog -Message "Excluded by pattern '$pattern': $($fileInfo.Name)" -Level DEBUG -Component 'DISCOVERY'
+                            break
                         }
                     }
                     
-                    $allFiles.Add($fileInfo)
-                    $processedCount++
-                    
-                    # Periodic progress in strict mode
-                    if ($StrictMode -and $processedCount % 5000 -eq 0) {
-                        Write-HashSmithLog -Message "Discovery progress: $processedCount files found" -Level PROGRESS -Component 'DISCOVERY'
+                    if (-not $shouldExclude) {
+                        # Strict mode validation
+                        if ($StrictMode) {
+                            # Verify file is still accessible
+                            if (-not (Test-Path -LiteralPath $fileInfo.FullName)) {
+                                Write-HashSmithLog -Message "File disappeared during discovery: $($fileInfo.Name)" -Level WARN -Component 'DISCOVERY'
+                                continue
+                            }
+                            
+                            # Get integrity snapshot for later verification
+                            $snapshot = Get-HashSmithFileIntegritySnapshot -Path $fileInfo.FullName
+                            if ($snapshot) {
+                                Add-Member -InputObject $fileInfo -NotePropertyName 'IntegritySnapshot' -NotePropertyValue $snapshot
+                            }
+                        }
+                        
+                        $allFiles.Add($fileInfo)
+                        $processedCount++
                     }
                 }
-            }
-            catch {
-                $errorDetails = @{
-                    Path = $filePath
-                    Error = $_.Exception.Message
-                    Timestamp = Get-Date
-                    Category = 'FileAccess'
+                catch {
+                    $errorDetails = @{
+                        Path = $filePath
+                        Error = $_.Exception.Message
+                        Timestamp = Get-Date
+                        Category = 'FileAccess'
+                    }
+                    $errors.Add($errorDetails)
+                    Write-HashSmithLog -Message "Error accessing file during discovery: $([System.IO.Path]::GetFileName($filePath)) - $($_.Exception.Message)" -Level WARN -Component 'DISCOVERY'
+                    Update-HashSmithCircuitBreaker -IsFailure:$true -Component 'DISCOVERY'
                 }
-                $errors.Add($errorDetails)
-                Write-HashSmithLog -Message "Error accessing file during discovery: $([System.IO.Path]::GetFileName($filePath)) - $($_.Exception.Message)" -Level WARN -Component 'DISCOVERY'
-                Update-HashSmithCircuitBreaker -IsFailure:$true -Component 'DISCOVERY'
             }
+            
+            # Clear the progress line
+            Write-Host "`r$(' ' * 80)`r" -NoNewline
         }
         
     }
@@ -194,9 +327,10 @@ function Get-HashSmithAllFiles {
     }
     
     $discoveryDuration = (Get-Date) - $discoveryStart
-    $stats = Get-HashSmithStatistics
-    $stats.FilesDiscovered = $allFiles.Count
-    $stats.FilesSymlinks = $symlinkCount
+    
+    # Update statistics properly using the new functions
+    Set-HashSmithStatistic -Name 'FilesDiscovered' -Value $allFiles.Count
+    Set-HashSmithStatistic -Name 'FilesSymlinks' -Value $symlinkCount
     
     Write-HashSmithLog -Message "File discovery completed in $($discoveryDuration.TotalSeconds.ToString('F2')) seconds" -Level SUCCESS -Component 'DISCOVERY'
     Write-HashSmithLog -Message "Files found: $($allFiles.Count)" -Level STATS -Component 'DISCOVERY'

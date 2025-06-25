@@ -291,6 +291,67 @@ function Reset-HashSmithStatistics {
     }
 }
 
+<#
+.SYNOPSIS
+    Updates a specific statistic value
+
+.DESCRIPTION
+    Updates a specific statistic in the global statistics hashtable
+
+.PARAMETER Name
+    The name of the statistic to update
+
+.PARAMETER Value
+    The value to set
+
+.EXAMPLE
+    Set-HashSmithStatistic -Name 'FilesDiscovered' -Value 1000
+#>
+function Set-HashSmithStatistic {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+        
+        [Parameter(Mandatory)]
+        $Value
+    )
+    
+    $Script:Statistics[$Name] = $Value
+}
+
+<#
+.SYNOPSIS
+    Increments a specific statistic value
+
+.DESCRIPTION
+    Increments a specific statistic in the global statistics hashtable
+
+.PARAMETER Name
+    The name of the statistic to increment
+
+.PARAMETER Amount
+    The amount to increment by (default: 1)
+
+.EXAMPLE
+    Add-HashSmithStatistic -Name 'FilesProcessed' -Amount 1
+#>
+function Add-HashSmithStatistic {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+        
+        [int]$Amount = 1
+    )
+    
+    if ($Script:Statistics.ContainsKey($Name)) {
+        $Script:Statistics[$Name] += $Amount
+    } else {
+        $Script:Statistics[$Name] = $Amount
+    }
+}
+
 #endregion
 
 # Export public functions
@@ -305,7 +366,9 @@ Export-ModuleMember -Function @(
     'Get-HashSmithStructuredLogs',
     'Add-HashSmithStructuredLog',
     'Initialize-HashSmithConfig',
-    'Reset-HashSmithStatistics'
+    'Reset-HashSmithStatistics',
+    'Set-HashSmithStatistic',
+    'Add-HashSmithStatistic'
 )
 
 # Export variables that need to be accessible

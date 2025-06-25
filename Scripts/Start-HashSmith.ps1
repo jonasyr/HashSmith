@@ -338,6 +338,22 @@ try {
     $allFiles = $discoveryResult.Files
     $discoveryStats = $discoveryResult.Statistics
     
+    # Display discovery results prominently
+    Write-Host ""
+    Write-Host "✅ " -NoNewline -ForegroundColor Green
+    Write-Host "File Discovery Complete" -BackgroundColor DarkGreen -ForegroundColor White
+    Write-Host "   📁 Files found: " -NoNewline -ForegroundColor Cyan
+    Write-Host "$($allFiles.Count)" -ForegroundColor White -BackgroundColor DarkCyan
+    Write-Host "   ⏭️  Files skipped: " -NoNewline -ForegroundColor Yellow
+    Write-Host "$($discoveryStats.TotalSkipped)" -ForegroundColor Black -BackgroundColor Yellow
+    Write-Host "   🔗 Symbolic links: " -NoNewline -ForegroundColor Magenta
+    Write-Host "$($discoveryStats.TotalSymlinks)" -ForegroundColor White -BackgroundColor DarkMagenta
+    if ($discoveryResult.Errors.Count -gt 0) {
+        Write-Host "   ⚠️  Discovery errors: " -NoNewline -ForegroundColor Red
+        Write-Host "$($discoveryResult.Errors.Count)" -ForegroundColor White -BackgroundColor Red
+    }
+    Write-Host ""
+    
     if ($discoveryResult.Errors.Count -gt 0) {
         Write-HashSmithLog -Message "Discovery completed with $($discoveryResult.Errors.Count) errors" -Level WARN
         if ($StrictMode -and $discoveryResult.Errors.Count -gt ($allFiles.Count * 0.01)) {
