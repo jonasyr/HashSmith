@@ -67,6 +67,9 @@
 .PARAMETER StrictMode
     Enable strict mode with maximum validation (slower but safer).
     
+.PARAMETER SortFilesBySize
+    Sort files by size (smaller first) for better progress indication when large files are present.
+    
 .EXAMPLE
     .\Start-HashSmith.ps1 -SourceDir "C:\Data" -HashAlgorithm MD5
     
@@ -178,6 +181,9 @@ param(
     
     [Parameter()]
     [switch]$StrictMode,
+    
+    [Parameter()]
+    [switch]$SortFilesBySize,
     
     [Parameter()]
     [switch]$UseParallel
@@ -344,6 +350,7 @@ try {
     Write-ConfigItem -Icon "🛡️" -Label "Verify Integrity" -Value $VerifyIntegrity -Color $(if($VerifyIntegrity){"Green"}else{"Gray"})
     Write-ConfigItem -Icon "⚡" -Label "Strict Mode" -Value $StrictMode -Color $(if($StrictMode){"Yellow"}else{"Gray"})
     Write-ConfigItem -Icon "🧪" -Label "Test Mode" -Value $TestMode -Color $(if($TestMode){"Yellow"}else{"Gray"})
+    Write-ConfigItem -Icon "📊" -Label "Sort by Size" -Value $SortFilesBySize -Color $(if($SortFilesBySize){"Green"}else{"Gray"})
     
     # Test write permissions with enhanced error handling
     if (-not $WhatIfPreference) {
@@ -440,16 +447,41 @@ try {
     $totalFiles = $filesToProcess.Count
     $totalSize = ($filesToProcess | Measure-Object -Property Length -Sum).Sum
     
+    # Sort files by size if requested (smaller files first for better progress indication)
+    if ($SortFilesBySize) {
+        Write-Host "📊 Sorting files by size (smaller first)..." -ForegroundColor Cyan
+        $filesToProcess = $filesToProcess | Sort-Object Length
+        Write-Host "✅ Files sorted - smaller files will be processed first" -ForegroundColor Green
+    }
+    
     # Enhanced estimation based on file characteristics
     $smallFiles = ($filesToProcess | Where-Object { $_.Length -lt 1MB }).Count
     $mediumFiles = ($filesToProcess | Where-Object { $_.Length -ge 1MB -and $_.Length -lt 100MB }).Count
     $largeFiles = ($filesToProcess | Where-Object { $_.Length -ge 100MB }).Count
+    
+    # Check for very large files (>1GB) that will significantly impact processing time
+    $veryLargeFiles = ($filesToProcess | Where-Object { $_.Length -ge 1GB }).Count
+    $giantFiles = ($filesToProcess | Where-Object { $_.Length -ge 10GB }).Count
+    
+    # Analyze first chunk to detect large files early (this affects initial time estimates)
+    $firstChunkSize = [Math]::Min($ChunkSize, $filesToProcess.Count)
+    $firstChunk = $filesToProcess[0..($firstChunkSize - 1)]
+    $firstChunkLargeFiles = ($firstChunk | Where-Object { $_.Length -ge 100MB }).Count
+    $firstChunkVeryLargeFiles = ($firstChunk | Where-Object { $_.Length -ge 1GB }).Count
+    $firstChunkSize = ($firstChunk | Measure-Object -Property Length -Sum).Sum
     
     # More realistic throughput estimates based on actual MD5 hash processing performance
     # These values are calibrated based on real-world PowerShell hash processing
     $smallFileRate = 15   # files per second for small files (more realistic with file I/O overhead)
     $mediumThroughput = 25MB  # MB/s for medium files (PowerShell hash processing is slower than raw I/O)
     $largeThroughput = 40MB   # MB/s for large files (streaming helps but still limited by hash computation)
+    $veryLargeThroughput = 30MB  # MB/s for very large files (>1GB, slower due to I/O pressure)
+    
+    # Adjust throughput estimates if very large files are detected in first chunk
+    if ($firstChunkVeryLargeFiles -gt 0) {
+        $largeThroughput = 25MB  # Reduce estimate when very large files are present
+        $veryLargeThroughput = 20MB  # Even slower for giant files
+    }
     
     # Calculate actual threads used (same logic as processor module)
     $useParallelForCalculation = if ($UseParallel) { 
@@ -478,13 +510,25 @@ try {
     $mediumFileSize = ($filesToProcess | Where-Object { $_.Length -ge 1MB -and $_.Length -lt 100MB } | Measure-Object -Property Length -Sum).Sum
     $mediumFileTime = ($mediumFileSize / $mediumThroughput) / $actualThreads
     
-    $largeFileSize = ($filesToProcess | Where-Object { $_.Length -ge 100MB } | Measure-Object -Property Length -Sum).Sum
+    # Separate large files into different categories for better estimation
+    $largeFileSize = ($filesToProcess | Where-Object { $_.Length -ge 100MB -and $_.Length -lt 1GB } | Measure-Object -Property Length -Sum).Sum
     $largeFileTime = ($largeFileSize / $largeThroughput) / $actualThreads
+    
+    $veryLargeFileSize = ($filesToProcess | Where-Object { $_.Length -ge 1GB } | Measure-Object -Property Length -Sum).Sum
+    $veryLargeFileTime = ($veryLargeFileSize / $veryLargeThroughput) / $actualThreads
     
     # Add realistic overhead for thread coordination, logging, and I/O contention
     $baseOverhead = [Math]::Max(60, $totalFiles * 0.1)  # Minimum 1 minute + 0.1s per file
     $overheadFactor = 2.2  # More realistic overhead factor for PowerShell hash operations
-    $estimatedTime = (($smallFileTime + $mediumFileTime + $largeFileTime) * $overheadFactor + $baseOverhead) / 60
+    
+    # Increase overhead factor if large files are detected early
+    if ($firstChunkVeryLargeFiles -gt 0) {
+        $overheadFactor = 3.0  # Increase overhead when very large files detected
+    } elseif ($firstChunkLargeFiles -gt ($firstChunkSize / 3)) {
+        $overheadFactor = 2.6  # Moderate increase for many large files
+    }
+    
+    $estimatedTime = (($smallFileTime + $mediumFileTime + $largeFileTime + $veryLargeFileTime) * $overheadFactor + $baseOverhead) / 60
     
     # Processing overview with enhanced file breakdown
     Write-ProfessionalHeader -Title "Processing Overview" -Color "Magenta"
@@ -499,12 +543,34 @@ try {
         Write-StatItem -Icon "🔹" -Label "Medium Files (1MB-100MB)" -Value $mediumFiles -Color "Cyan"
     }
     if ($largeFiles -gt 0) {
-        Write-StatItem -Icon "🔶" -Label "Large Files (>100MB)" -Value $largeFiles -Color "DarkYellow"
+        Write-StatItem -Icon "🔶" -Label "Large Files (100MB-1GB)" -Value ($largeFiles - $veryLargeFiles) -Color "DarkYellow"
+    }
+    if ($veryLargeFiles -gt 0) {
+        Write-StatItem -Icon "🔺" -Label "Very Large Files (>1GB)" -Value $veryLargeFiles -Color "Red"
+    }
+    if ($giantFiles -gt 0) {
+        Write-StatItem -Icon "⚠️ " -Label "Giant Files (>10GB)" -Value $giantFiles -Color "Magenta"
+    }
+    
+    # Warning for large files detected in first chunk
+    if ($firstChunkVeryLargeFiles -gt 0) {
+        Write-Host ""
+        Write-Host "⚠️  WARNING: $firstChunkVeryLargeFiles very large file(s) detected in first chunk!" -ForegroundColor Red
+        Write-Host "   📊 First chunk size: $('{0:N1} GB' -f ($firstChunkSize / 1GB))" -ForegroundColor Yellow
+        Write-Host "   ⏱️  Initial processing may be slower than estimated" -ForegroundColor Yellow
+    } elseif ($firstChunkLargeFiles -gt 3) {
+        Write-Host ""
+        Write-Host "⚠️  NOTICE: $firstChunkLargeFiles large file(s) in first chunk may slow initial progress" -ForegroundColor Yellow
     }
     
     # More realistic time estimate with range showing best/worst case scenarios
     $bestCaseTime = $estimatedTime * 0.7  # Best case: faster storage, fewer file system delays
     $worstCaseTime = $estimatedTime * 1.8  # Worst case: slower storage, fragmented files, I/O contention
+    
+    # Increase worst case significantly if very large files are present
+    if ($veryLargeFiles -gt 0) {
+        $worstCaseTime = $estimatedTime * 2.5  # Much longer for very large files
+    }
     
     if ($estimatedTime -lt 1) {
         $estimatedSeconds = $estimatedTime * 60
@@ -520,6 +586,11 @@ try {
     }
     Write-Host "   ⚠️  Range accounts for storage speed & I/O patterns" -ForegroundColor Gray
     Write-Host "   📊 Based on MD5 computation: ~15 small files/sec, ~25-40 MB/sec" -ForegroundColor Gray
+    
+    # Additional warning for very large files
+    if ($veryLargeFiles -gt 0) {
+        Write-Host "   🔺 Very large files detected - processing time may exceed estimates" -ForegroundColor Red
+    }
     
     Write-StatItem -Icon "🧵" -Label "Threads" -Value "$actualThreads (of $MaxThreads max)" -Color "Magenta"
     Write-StatItem -Icon "📦" -Label "Chunk Size" -Value $ChunkSize -Color "Yellow"
