@@ -511,7 +511,7 @@ We welcome contributions! HashSmith is built for the enterprise community.
 ### Development Setup
 ```powershell
 # Clone and setup development environment
-git clone https://github.com/your-org/hashsmith.git
+git clone https://github.com/jonasyr/hashsmith.git
 cd hashsmith
 
 # Install development dependencies
