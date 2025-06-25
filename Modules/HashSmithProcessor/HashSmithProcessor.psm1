@@ -108,7 +108,7 @@ function Start-HashSmithFileProcessing {
     
     # Calculate optimal thread count for stability
     $safeThreads = if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-        $threads = [Math]::Round([Environment]::ProcessorCount * 0.75)  # Use 75% of cores for stability
+        $threads = [Math]::Round([Environment]::ProcessorCount * 0.80)  # Use 80% of cores for optimal performance
         if ($threads -lt 1) { $threads = 1 }
         [Math]::Min($MaxThreads, $threads)
     } else {
@@ -117,7 +117,7 @@ function Start-HashSmithFileProcessing {
     
     # Log processing mode once
     if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-        Write-HashSmithLog -Message "Parallel processing enabled: $safeThreads threads (optimized for stability)" -Level INFO -Component 'PROCESS'
+        Write-HashSmithLog -Message "Parallel processing enabled: $safeThreads threads (optimized for performance)" -Level INFO -Component 'PROCESS'
     } elseif ($UseParallel) {
         Write-HashSmithLog -Message "Parallel processing requested but using sequential (PowerShell 5.1)" -Level INFO -Component 'PROCESS'
     } else {

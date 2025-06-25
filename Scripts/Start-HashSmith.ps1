@@ -452,7 +452,7 @@ try {
     
     # Calculate actual threads used (same logic as processor module)
     $actualThreads = if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-        $threads = [Math]::Round([Environment]::ProcessorCount * 0.75)  # Use 75% of cores for stability
+        $threads = [Math]::Round([Environment]::ProcessorCount * 0.80)  # Use 80% of cores for optimal performance
         if ($threads -lt 1) { $threads = 1 }
         [Math]::Min($MaxThreads, $threads)
     } else {
@@ -513,7 +513,7 @@ try {
         
         # Calculate file distribution for WhatIf using actual threads
         $actualThreads = if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-            $threads = [Math]::Round([Environment]::ProcessorCount * 0.75)  # Use 75% of cores for stability
+            $threads = [Math]::Round([Environment]::ProcessorCount * 0.80)  # Use 80% of cores for optimal performance
             if ($threads -lt 1) { $threads = 1 }
             [Math]::Min($MaxThreads, $threads)
         } else {
