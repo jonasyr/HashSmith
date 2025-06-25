@@ -184,17 +184,23 @@ function Start-HashSmithFileProcessing {
                 $startTime = Get-Date
                 
                 try {
-                    # Simple hash computation without complex retry logic
+                    # Use streaming hash computation to support files of any size
                     $hashAlgorithm = [System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)
                     try {
-                        $fileBytes = [System.IO.File]::ReadAllBytes($file.FullName)
-                        $hashBytes = $hashAlgorithm.ComputeHash($fileBytes)
-                        $result.Hash = [System.BitConverter]::ToString($hashBytes) -replace '-', ''
-                        $result.Hash = $result.Hash.ToLower()
-                        $result.Success = $true
-                        
-                        # Small delay to reduce system strain and prevent freezes
-                        Start-Sleep -Milliseconds 75
+                        # Use FileStream for files of any size (not ReadAllBytes which is limited to 2GB)
+                        $fileStream = [System.IO.File]::OpenRead($file.FullName)
+                        try {
+                            $hashBytes = $hashAlgorithm.ComputeHash($fileStream)
+                            $result.Hash = [System.BitConverter]::ToString($hashBytes) -replace '-', ''
+                            $result.Hash = $result.Hash.ToLower()
+                            $result.Success = $true
+                            
+                            # Small delay to reduce system strain and prevent freezes
+                            Start-Sleep -Milliseconds 75
+                        }
+                        finally {
+                            if ($fileStream) { $fileStream.Dispose() }
+                        }
                     }
                     finally {
                         if ($hashAlgorithm) { $hashAlgorithm.Dispose() }

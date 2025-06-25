@@ -399,7 +399,7 @@ function Add-HashSmithStatistic {
         [Parameter(Mandatory)]
         [string]$Name,
         
-        [int]$Amount = 1
+        [long]$Amount = 1
     )
     
     if ($Script:Statistics.ContainsKey($Name)) {

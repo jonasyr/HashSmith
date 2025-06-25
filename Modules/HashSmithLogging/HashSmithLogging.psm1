@@ -100,30 +100,16 @@ function Initialize-HashSmithLogFile {
     
     $config = Get-HashSmithConfig
     
-    # Create log file with enhanced header
+    # Create log file with concise header
     $header = @(
-        "# File Integrity Log - HashSmith v$($config.Version)",
-        "# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
-        "# Algorithm: $Algorithm",
-        "# Source: $SourcePath",
-        "# Files Discovered: $($DiscoveryStats.TotalFound)",
-        "# Files Skipped: $($DiscoveryStats.TotalSkipped)",
-        "# Symbolic Links: $($DiscoveryStats.TotalSymlinks)",
-        "# Discovery Errors: $($DiscoveryStats.TotalErrors)",
-        "# Discovery Time: $($DiscoveryStats.DiscoveryTime.ToString('F2'))s",
-        "# Configuration:",
-        "#   Include Hidden: $($Configuration.IncludeHidden)",
-        "#   Include Symlinks: $($Configuration.IncludeSymlinks)",
-        "#   Verify Integrity: $($Configuration.VerifyIntegrity)",
-        "#   Strict Mode: $($Configuration.StrictMode)",
-        "#   Max Threads: $($Configuration.MaxThreads)",
-        "#   Chunk Size: $($Configuration.ChunkSize)",
-        "# Format: full/path/to/file.txt = hash, size: size in bytes",
+        "# HashSmith v$($config.Version) - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+        "# Algorithm: $Algorithm | Source: $SourcePath",
+        "# Files: $($DiscoveryStats.TotalFound) found, $($DiscoveryStats.TotalSkipped) skipped, $($DiscoveryStats.TotalSymlinks) symlinks",
         ""
     )
     
     $header | Set-Content -Path $LogPath -Encoding UTF8
-    Write-HashSmithLog -Message "Enhanced log file initialized with comprehensive header" -Level SUCCESS -Component 'LOG'
+    Write-HashSmithLog -Message "Log file initialized with concise header" -Level SUCCESS -Component 'LOG'
 }
 
 <#
