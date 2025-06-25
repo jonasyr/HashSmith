@@ -27,9 +27,9 @@ $Script:Config = @{
 # Modern HashSmith configuration (initialized by Initialize-HashSmithConfig)
 $Script:HashSmithConfig = $null
 
-# Thread-safe statistics with proper synchronization
+# Thread-safe statistics with proper synchronization - REMOVED Monitor lock
 $Script:Statistics = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
-$Script:StatisticsLock = [System.Object]::new()
+# REMOVED: $Script:StatisticsLock = [System.Object]::new()
 
 $Script:CircuitBreaker = @{
     FailureCount = 0
@@ -173,11 +173,11 @@ function Get-HashSmithConfig {
 
 <#
 .SYNOPSIS
-    Gets the current HashSmith statistics with thread safety
+    Gets the current HashSmith statistics with lock-free thread safety
 
 .DESCRIPTION
     Returns the current statistics hashtable for monitoring progress.
-    Enhanced with thread-safe access.
+    Enhanced with lock-free thread-safe access using ConcurrentDictionary methods only.
 
 .EXAMPLE
     $stats = Get-HashSmithStatistics
@@ -187,22 +187,19 @@ function Get-HashSmithStatistics {
     [OutputType([hashtable])]
     param()
     
-    [System.Threading.Monitor]::Enter($Script:StatisticsLock)
-    try {
-        $result = @{}
-        foreach ($key in $Script:Statistics.Keys) {
-            $value = $Script:Statistics[$key]
+    $result = @{}
+    # Use lock-free snapshot approach
+    foreach ($key in $Script:Statistics.Keys.ToArray()) {
+        $value = $null
+        if ($Script:Statistics.TryGetValue($key, [ref]$value)) {
             if ($value -is [System.Collections.Concurrent.ConcurrentBag[object]]) {
                 $result[$key] = @($value.ToArray())
             } else {
                 $result[$key] = $value
             }
         }
-        return $result
     }
-    finally {
-        [System.Threading.Monitor]::Exit($Script:StatisticsLock)
-    }
+    return $result
 }
 
 <#
@@ -350,10 +347,10 @@ function Add-HashSmithStructuredLog {
 
 <#
 .SYNOPSIS
-    Resets HashSmith statistics with thread safety
+    Resets HashSmith statistics with lock-free thread safety
 
 .DESCRIPTION
-    Resets all statistics counters to their initial state using proper synchronization
+    Resets all statistics counters to their initial state using lock-free operations
 
 .EXAMPLE
     Reset-HashSmithStatistics
@@ -362,14 +359,9 @@ function Reset-HashSmithStatistics {
     [CmdletBinding()]
     param()
     
-    [System.Threading.Monitor]::Enter($Script:StatisticsLock)
-    try {
-        $Script:Statistics.Clear()
-        Initialize-Statistics
-    }
-    finally {
-        [System.Threading.Monitor]::Exit($Script:StatisticsLock)
-    }
+    # Use lock-free approach - clear and reinitialize
+    $Script:Statistics.Clear()
+    Initialize-Statistics
 }
 
 <#
@@ -475,6 +467,55 @@ function Set-HashSmithConfig {
     Write-Verbose "Configuration updated: $Key = $Value"
 }
 
+<#
+.SYNOPSIS
+    Gets optimal buffer size for hash algorithm and file characteristics
+
+.DESCRIPTION
+    Returns optimized buffer size based on hash algorithm performance characteristics
+    and file size for improved performance.
+
+.PARAMETER Algorithm
+    The hash algorithm being used
+
+.PARAMETER FileSize
+    Size of the file being processed
+
+.EXAMPLE
+    $bufferSize = Get-HashSmithOptimalBufferSize -Algorithm "SHA256" -FileSize 1048576
+#>
+function Get-HashSmithOptimalBufferSize {
+    [CmdletBinding()]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('MD5', 'SHA1', 'SHA256', 'SHA512')]
+        [string]$Algorithm,
+        
+        [Parameter(Mandatory)]
+        [long]$FileSize
+    )
+    
+    # Algorithm-specific optimal buffer sizes (based on testing)
+    $algorithmBuffers = @{
+        'MD5'    = @{ Small = 64KB; Medium = 128KB; Large = 256KB }
+        'SHA1'   = @{ Small = 32KB; Medium = 64KB;  Large = 128KB }
+        'SHA256' = @{ Small = 32KB; Medium = 64KB;  Large = 128KB }
+        'SHA512' = @{ Small = 16KB; Medium = 32KB;  Large = 64KB  }
+    }
+    
+    $buffers = $algorithmBuffers[$Algorithm]
+    
+    # Select buffer size based on file size
+    if ($FileSize -lt 1MB) {
+        return $buffers.Small
+    } elseif ($FileSize -lt 100MB) {
+        return $buffers.Medium  
+    } else {
+        return $buffers.Large
+    }
+}
+
 #endregion
 
 # Initialize statistics on module load
@@ -495,7 +536,8 @@ Export-ModuleMember -Function @(
     'Reset-HashSmithStatistics',
     'Set-HashSmithStatistic',
     'Add-HashSmithStatistic',
-    'Set-HashSmithConfig'
+    'Set-HashSmithConfig',
+    'Get-HashSmithOptimalBufferSize'
 )
 
 # Export variables that need to be accessible

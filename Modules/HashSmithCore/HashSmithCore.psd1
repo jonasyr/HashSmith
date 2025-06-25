@@ -23,7 +23,9 @@
         'Update-HashSmithSpinner',
         'Show-HashSmithSpinnerDemo',
         'Show-HashSmithFileSpinner',
-        'Clear-HashSmithFileSpinner'
+        'Clear-HashSmithFileSpinner',
+        'Start-HashSmithNetworkMonitor',
+        'Stop-HashSmithNetworkMonitor'
     )
     VariablesToExport = @()
     CmdletsToExport = @()

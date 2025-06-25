@@ -5,6 +5,7 @@
 .DESCRIPTION
     This module provides secure and resilient hash computation capabilities with
     integrity verification, race condition detection, and comprehensive error handling.
+    Enhanced with chunked processing for large files to prevent memory exhaustion.
 #>
 
 # Import required modules
@@ -14,11 +15,82 @@
 
 <#
 .SYNOPSIS
+    Computes hash using chunked streaming for memory efficiency
+
+.DESCRIPTION
+    Processes large files in chunks to prevent memory exhaustion and improve
+    performance for files >100MB. Uses streaming hash computation with
+    TransformBlock/TransformFinalBlock pattern.
+
+.PARAMETER FileStream
+    The file stream to process
+
+.PARAMETER HashAlgorithm  
+    The hash algorithm instance
+
+.PARAMETER ChunkSizeMB
+    Chunk size in megabytes (default: 64MB)
+
+.EXAMPLE
+    $hash = Get-HashSmithStreamingHash -FileStream $stream -HashAlgorithm $hasher
+#>
+function Get-HashSmithStreamingHash {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [System.IO.FileStream]$FileStream,
+        
+        [Parameter(Mandatory)]
+        [System.Security.Cryptography.HashAlgorithm]$HashAlgorithm,
+        
+        [ValidateRange(1, 512)]
+        [int]$ChunkSizeMB = 64
+    )
+    
+    $chunkSize = $ChunkSizeMB * 1MB
+    $buffer = [byte[]]::new($chunkSize)
+    $totalRead = 0
+    $fileSize = $FileStream.Length
+    
+    try {
+        while ($totalRead -lt $fileSize) {
+            $bytesToRead = [Math]::Min($chunkSize, $fileSize - $totalRead)
+            $bytesRead = $FileStream.Read($buffer, 0, $bytesToRead)
+            
+            if ($bytesRead -eq 0) { break }
+            
+            if ($totalRead + $bytesRead -eq $fileSize) {
+                # Final block
+                $HashAlgorithm.TransformFinalBlock($buffer, 0, $bytesRead) | Out-Null
+            } else {
+                # Intermediate block  
+                $HashAlgorithm.TransformBlock($buffer, 0, $bytesRead, $null, 0) | Out-Null
+            }
+            
+            $totalRead += $bytesRead
+            
+            # Yield CPU every 256MB to prevent monopolization
+            if ($totalRead % (256MB) -eq 0) {
+                Start-Sleep -Milliseconds 1
+            }
+        }
+        
+        return $HashAlgorithm.Hash
+    }
+    catch {
+        Write-HashSmithLog -Message "Streaming hash error: $($_.Exception.Message)" -Level ERROR -Component 'HASH'
+        throw
+    }
+}
+
+<#
+.SYNOPSIS
     Computes file hash with comprehensive error handling and integrity verification
 
 .DESCRIPTION
     Safely computes cryptographic hashes for files with retry logic, race condition
     detection, integrity verification, and circuit breaker pattern for resilience.
+    Enhanced with chunked processing for large files and dynamic buffer optimization.
 
 .PARAMETER Path
     The file path to compute hash for
@@ -142,7 +214,7 @@ function Get-HashSmithFileHashSafe {
                 }
             }
             
-            # Compute hash using streaming approach
+            # Compute hash using streaming approach with dynamic buffer optimization
             $hashAlgorithm = [System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)
             $fileStream = $null
             $showSpinner = $currentFileInfo.Length -gt (10MB)  # Lower threshold to show spinner sooner
@@ -161,55 +233,61 @@ function Get-HashSmithFileHashSafe {
                 # Use FileShare.Read and FileOptions.SequentialScan for better performance and locked file access
                 $fileStream = [System.IO.FileStream]::new($normalizedPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, 4096, [System.IO.FileOptions]::SequentialScan)
                 
-                # Use smaller buffer for reduced memory pressure and better responsiveness
-                $bufferSize = [Math]::Min($config.BufferSize, 65536)  # Max 64KB buffer
-                $buffer = [byte[]]::new($bufferSize)
-                $totalRead = 0
-                $lastSpinnerUpdate = Get-Date
-                $readOperations = 0
-                
-                # Initialize hash computation
-                if ($currentFileInfo.Length -eq 0) {
-                    # Handle zero-byte files explicitly
-                    $hashBytes = $hashAlgorithm.ComputeHash([byte[]]::new(0))
+                # Use chunked processing for large files (>100MB)
+                if ($currentFileInfo.Length -gt 100MB) {
+                    Write-HashSmithLog -Message "Using chunked processing for large file: $([System.IO.Path]::GetFileName($Path))" -Level DEBUG -Component 'HASH'
+                    $hashBytes = Get-HashSmithStreamingHash -FileStream $fileStream -HashAlgorithm $hashAlgorithm -ChunkSizeMB 64
                 } else {
-                    # Stream-based hash computation with system load reduction
-                    while ($totalRead -lt $currentFileInfo.Length) {
-                        $bytesRead = $fileStream.Read($buffer, 0, $buffer.Length)
-                        if ($bytesRead -eq 0) { break }
-                        
-                        if ($totalRead + $bytesRead -eq $currentFileInfo.Length) {
-                            # Final block
-                            $hashAlgorithm.TransformFinalBlock($buffer, 0, $bytesRead) | Out-Null
-                        } else {
-                            # Intermediate block
-                            $hashAlgorithm.TransformBlock($buffer, 0, $bytesRead, $null, 0) | Out-Null
-                        }
-                        
-                        $totalRead += $bytesRead
-                        $readOperations++
-                        
-                        # Add small delay every few operations to reduce system strain
-                        if ($readOperations % 50 -eq 0 -and $currentFileInfo.Length -gt 100MB) {
-                            Start-Sleep -Milliseconds 10
-                        }
-                        
-                        # Update spinner message for very large files
-                        if ($showSpinner -and ((Get-Date) - $lastSpinnerUpdate).TotalSeconds -ge 2) {
-                            $progress = ($totalRead / $currentFileInfo.Length) * 100
-                            $fileName = [System.IO.Path]::GetFileName($Path)
-                            $sizeText = "$('{0:N1} MB' -f ($currentFileInfo.Length / 1MB))"
-                            Update-HashSmithSpinner -Message "Processing large file: $fileName ($sizeText) - $($progress.ToString('F1'))%"
-                            $lastSpinnerUpdate = Get-Date
-                        }
-                        
-                        # Verify we haven't read more than expected (corruption detection)
-                        if ($totalRead -gt $currentFileInfo.Length) {
-                            throw [System.InvalidDataException]::new("Read more bytes than file size indicates - possible corruption")
-                        }
-                    }
+                    # Standard processing for smaller files with dynamic buffer optimization
+                    $bufferSize = Get-HashSmithOptimalBufferSize -Algorithm $Algorithm -FileSize $currentFileInfo.Length
+                    $buffer = [byte[]]::new($bufferSize)
+                    $totalRead = 0
+                    $lastSpinnerUpdate = Get-Date
+                    $readOperations = 0
                     
-                    $hashBytes = $hashAlgorithm.Hash
+                    # Initialize hash computation
+                    if ($currentFileInfo.Length -eq 0) {
+                        # Handle zero-byte files explicitly
+                        $hashBytes = $hashAlgorithm.ComputeHash([byte[]]::new(0))
+                    } else {
+                        # Stream-based hash computation with system load reduction
+                        while ($totalRead -lt $currentFileInfo.Length) {
+                            $bytesRead = $fileStream.Read($buffer, 0, $buffer.Length)
+                            if ($bytesRead -eq 0) { break }
+                            
+                            if ($totalRead + $bytesRead -eq $currentFileInfo.Length) {
+                                # Final block
+                                $hashAlgorithm.TransformFinalBlock($buffer, 0, $bytesRead) | Out-Null
+                            } else {
+                                # Intermediate block
+                                $hashAlgorithm.TransformBlock($buffer, 0, $bytesRead, $null, 0) | Out-Null
+                            }
+                            
+                            $totalRead += $bytesRead
+                            $readOperations++
+                            
+                            # Add small delay every few operations to reduce system strain
+                            if ($readOperations % 50 -eq 0 -and $currentFileInfo.Length -gt 100MB) {
+                                Start-Sleep -Milliseconds 10
+                            }
+                            
+                            # Update spinner message for very large files
+                            if ($showSpinner -and ((Get-Date) - $lastSpinnerUpdate).TotalSeconds -ge 2) {
+                                $progress = ($totalRead / $currentFileInfo.Length) * 100
+                                $fileName = [System.IO.Path]::GetFileName($Path)
+                                $sizeText = "$('{0:N1} MB' -f ($currentFileInfo.Length / 1MB))"
+                                Update-HashSmithSpinner -Message "Processing large file: $fileName ($sizeText) - $($progress.ToString('F1'))%"
+                                $lastSpinnerUpdate = Get-Date
+                            }
+                            
+                            # Verify we haven't read more than expected (corruption detection)
+                            if ($totalRead -gt $currentFileInfo.Length) {
+                                throw [System.InvalidDataException]::new("Read more bytes than file size indicates - possible corruption")
+                            }
+                        }
+                        
+                        $hashBytes = $hashAlgorithm.Hash
+                    }
                 }
                 
                 # Hash computation completed - no spinner cleanup needed since it's already done
@@ -289,13 +367,17 @@ function Get-HashSmithFileHashSafe {
         Write-HashSmithLog -Message "Hash computed successfully: $([System.IO.Path]::GetFileName($Path))" -Level DEBUG -Component 'HASH'
     } else {
         Write-HashSmithLog -Message "Hash computation failed after $($result.Attempts) attempts: $([System.IO.Path]::GetFileName($Path))" -Level ERROR -Component 'HASH'
-        $stats.ProcessingErrors += @{
-            Path = $Path
-            Error = $result.Error
-            ErrorCategory = $result.ErrorCategory
-            Attempts = $result.Attempts
-            RaceCondition = $result.RaceConditionDetected
-            Timestamp = Get-Date
+        $stats = Get-HashSmithStatistics
+        $processingErrors = $stats.ProcessingErrors
+        if ($processingErrors -is [System.Collections.Concurrent.ConcurrentBag[object]]) {
+            $processingErrors.Add(@{
+                Path = $Path
+                Error = $result.Error
+                ErrorCategory = $result.ErrorCategory
+                Attempts = $result.Attempts
+                RaceCondition = $result.RaceConditionDetected
+                Timestamp = Get-Date
+            })
         }
     }
     

@@ -21,7 +21,8 @@
         'Initialize-HashSmithConfig',
         'Reset-HashSmithStatistics',
         'Set-HashSmithStatistic',
-        'Add-HashSmithStatistic'
+        'Add-HashSmithStatistic',
+        'Get-HashSmithOptimalBufferSize'
     )
     VariablesToExport = @(
         'Config',

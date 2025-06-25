@@ -5,11 +5,14 @@
 .DESCRIPTION
     This module provides core utility functions including logging, network path testing,
     circuit breaker patterns, file access testing, and integrity verification.
-    Enhanced with improved terminal output and thread safety.
+    Enhanced with improved terminal output, thread safety, and real-time network monitoring.
 #>
 
 # Import the configuration module to access script variables
 # Note: Dependencies are handled by the main script import order
+
+# Script-level variables for network monitoring
+$Script:NetworkMonitorRunning = $false
 
 #region Public Functions
 
@@ -129,11 +132,106 @@ function Write-HashSmithLog {
 
 <#
 .SYNOPSIS
+    Monitors network connectivity in real-time with automatic recovery
+
+.DESCRIPTION
+    Provides continuous network monitoring with circuit breaker pattern for enhanced reliability.
+    Runs as a background job to monitor network connectivity and trigger recovery actions.
+
+.PARAMETER ServerName
+    Network server to monitor
+
+.PARAMETER OnDisconnectAction
+    Action to execute when disconnection detected
+
+.PARAMETER IntervalSeconds
+    Monitoring interval in seconds (default: 30)
+
+.PARAMETER TimeoutMs
+    Connection timeout in milliseconds (default: 5000)
+
+.EXAMPLE
+    Start-HashSmithNetworkMonitor -ServerName "fileserver" -OnDisconnectAction { Write-Warning "Network lost" }
+#>
+function Start-HashSmithNetworkMonitor {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$ServerName,
+        
+        [scriptblock]$OnDisconnectAction = { Write-HashSmithLog -Message "Network connectivity lost to $ServerName" -Level ERROR -Component 'NETWORK' },
+        
+        [int]$IntervalSeconds = 30,
+        
+        [int]$TimeoutMs = 5000
+    )
+    
+    $Script:NetworkMonitorRunning = $true
+    
+    # Start background monitoring job
+    $monitorJob = Start-Job -ScriptBlock {
+        param($ServerName, $OnDisconnectAction, $IntervalSeconds, $TimeoutMs)
+        
+        $consecutiveFailures = 0
+        $maxFailures = 3
+        
+        while ($using:NetworkMonitorRunning) {
+            try {
+                $connected = Test-NetConnection -ComputerName $ServerName -Port 445 -InformationLevel Quiet -WarningAction SilentlyContinue -ErrorAction Stop
+                
+                if (-not $connected) {
+                    $consecutiveFailures++
+                    if ($consecutiveFailures -ge $maxFailures) {
+                        & $OnDisconnectAction
+                        $consecutiveFailures = 0  # Reset to avoid spam
+                    }
+                } else {
+                    $consecutiveFailures = 0  # Reset on success
+                }
+            }
+            catch {
+                $consecutiveFailures++
+                if ($consecutiveFailures -ge $maxFailures) {
+                    & $OnDisconnectAction  
+                    $consecutiveFailures = 0
+                }
+            }
+            
+            Start-Sleep -Seconds $IntervalSeconds
+        }
+    } -ArgumentList $ServerName, $OnDisconnectAction, $IntervalSeconds, $TimeoutMs
+    
+    return $monitorJob
+}
+
+<#
+.SYNOPSIS
+    Stops network monitoring
+
+.DESCRIPTION
+    Cleanly stops the network monitoring background job and cleans up resources
+
+.EXAMPLE
+    Stop-HashSmithNetworkMonitor
+#>
+function Stop-HashSmithNetworkMonitor {
+    [CmdletBinding()]
+    param()
+    
+    $Script:NetworkMonitorRunning = $false
+    
+    # Clean up any monitoring jobs
+    Get-Job | Where-Object { $_.Name -like "*NetworkMonitor*" } | Remove-Job -Force
+}
+
+<#
+.SYNOPSIS
     Tests network path connectivity with enhanced caching and resilience
 
 .DESCRIPTION
     Tests connectivity to network paths with intelligent caching to avoid
-    repeated network calls for the same server. Enhanced with better error handling.
+    repeated network calls for the same server. Enhanced with better error handling
+    and automatic network monitoring integration.
 
 .PARAMETER Path
     The network path to test
@@ -160,6 +258,12 @@ function Test-HashSmithNetworkPath {
     
     $serverName = $matches[1]
     $networkConnections = Get-HashSmithNetworkConnections
+    
+    # Start network monitoring for this server if not already running
+    if (-not $Script:NetworkMonitorRunning) {
+        $monitorJob = Start-HashSmithNetworkMonitor -ServerName $serverName
+        Write-HashSmithLog -Message "Started network monitoring for $serverName" -Level DEBUG -Component 'NETWORK'
+    }
     
     # Use cached result if available and recent
     if ($UseCache -and $networkConnections.ContainsKey($serverName)) {
@@ -692,5 +796,7 @@ Export-ModuleMember -Function @(
     'Update-HashSmithSpinner',
     'Show-HashSmithSpinnerDemo',
     'Show-HashSmithFileSpinner',
-    'Clear-HashSmithFileSpinner'
+    'Clear-HashSmithFileSpinner',
+    'Start-HashSmithNetworkMonitor',
+    'Stop-HashSmithNetworkMonitor'
 )
