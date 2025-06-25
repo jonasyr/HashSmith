@@ -445,12 +445,13 @@ try {
     # Process files with enhanced features
     Write-HashSmithLog -Message "Starting enhanced file processing..." -Level INFO
     
-    # Determine if parallel processing should be used (temporarily disabled for stability)
-    # Determine if parallel processing should be used
-    $useParallel = $false  # Temporarily disable parallel processing to avoid stack overflow
-    
-    if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-        Write-Warning "Parallel processing temporarily disabled due to PowerShell stack overflow issue. Using sequential processing."
+    # Determine if parallel processing should be used 
+    $useParallel = if ($UseParallel) { 
+        $true 
+    } elseif ($PSVersionTable.PSVersion.Major -ge 7) { 
+        $true  # Default to parallel on PowerShell 7+
+    } else { 
+        $false 
     }
     
     $fileHashes = Start-HashSmithFileProcessing -Files $filesToProcess -LogPath $LogFile -Algorithm $HashAlgorithm -ExistingEntries $existingEntries -BasePath $SourceDir -StrictMode:$StrictMode -VerifyIntegrity:$VerifyIntegrity -MaxThreads $MaxThreads -ChunkSize $ChunkSize -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -ShowProgress:$ShowProgress -UseParallel:$useParallel
