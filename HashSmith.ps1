@@ -125,7 +125,7 @@ param(
     [string[]]$ExcludePatterns = @(),
     
     [Parameter()]
-    [switch]$IncludeHidden,
+    [bool]$IncludeHidden = $true,
     
     [Parameter()]
     [ValidateRange(1, 64)]
@@ -194,28 +194,83 @@ function Write-Log {
         [Parameter(Mandatory)]
         [string]$Message,
         
-        [ValidateSet('DEBUG', 'INFO', 'WARN', 'ERROR', 'SUCCESS')]
+        [ValidateSet('DEBUG', 'INFO', 'WARN', 'ERROR', 'SUCCESS', 'PROGRESS', 'HEADER', 'STATS')]
         [string]$Level = 'INFO',
         
         [string]$Component = 'MAIN',
         
-        [hashtable]$Data = @{}
+        [hashtable]$Data = @{},
+        
+        [switch]$NoTimestamp
     )
     
     $timestamp = Get-Date -Format $Script:Config.DateFormat
-    $logEntry = "[$timestamp] [$Level] [$Component] $Message"
     
-    # Console output with colors
-    $color = switch ($Level) {
-        'DEBUG'   { 'Gray' }
-        'INFO'    { 'White' }
-        'WARN'    { 'Yellow' }
-        'ERROR'   { 'Red' }
-        'SUCCESS' { 'Green' }
-        default   { 'White' }
+    # Create emoji/symbol prefixes for better visual appeal
+    $prefix = switch ($Level) {
+        'DEBUG'    { "🔍" }
+        'INFO'     { "ℹ️ " }
+        'WARN'     { "⚠️ " }
+        'ERROR'    { "❌" }
+        'SUCCESS'  { "✅" }
+        'PROGRESS' { "⚡" }
+        'HEADER'   { "🚀" }
+        'STATS'    { "📊" }
+        default    { "•" }
     }
     
-    Write-Host $logEntry -ForegroundColor $color
+    # Enhanced color scheme
+    $colors = @{
+        'DEBUG' = @{
+            Fore = 'DarkGray'
+            Back = 'Black'
+        }
+        'INFO' = @{
+            Fore = 'Cyan'
+            Back = 'Black'
+        }
+        'WARN' = @{
+            Fore = 'Yellow'
+            Back = 'DarkRed'
+        }
+        'ERROR' = @{
+            Fore = 'White'
+            Back = 'Red'
+        }
+        'SUCCESS' = @{
+            Fore = 'Black'
+            Back = 'Green'
+        }
+        'PROGRESS' = @{
+            Fore = 'Magenta'
+            Back = 'Black'
+        }
+        'HEADER' = @{
+            Fore = 'White'
+            Back = 'Blue'
+        }
+        'STATS' = @{
+            Fore = 'Green'
+            Back = 'Black'
+        }
+    }
+    
+    # Format the log entry
+    if ($NoTimestamp) {
+        $logEntry = "$prefix $Message"
+    } else {
+        $componentTag = if ($Component -ne 'MAIN') { "[$Component] " } else { "" }
+        $logEntry = "[$timestamp] $prefix $componentTag$Message"
+    }
+    
+    # Output with enhanced colors
+    $colorConfig = $colors[$Level]
+    if ($colorConfig) {
+        Write-Host $logEntry -ForegroundColor $colorConfig.Fore -BackgroundColor $colorConfig.Back
+    } else {
+        Write-Host $logEntry -ForegroundColor White
+    }
+    
     Write-Verbose $logEntry
     
     # Structured logging for JSON output
@@ -423,9 +478,9 @@ function Get-AllFiles {
     $Script:Statistics.FilesDiscovered = $allFiles.Count
     
     Write-Log "File discovery completed in $($discoveryDuration.TotalSeconds.ToString('F2')) seconds" -Level SUCCESS -Component 'DISCOVERY'
-    Write-Log "Files found: $($allFiles.Count)" -Level INFO -Component 'DISCOVERY'
-    Write-Log "Files skipped: $skippedCount" -Level INFO -Component 'DISCOVERY'
-    Write-Log "Discovery errors: $($errors.Count)" -Level INFO -Component 'DISCOVERY'
+    Write-Log "Files found: $($allFiles.Count)" -Level STATS -Component 'DISCOVERY'
+    Write-Log "Files skipped: $skippedCount" -Level STATS -Component 'DISCOVERY'
+    Write-Log "Discovery errors: $($errors.Count)" -Level $(if($errors.Count -gt 0){'WARN'}else{'STATS'}) -Component 'DISCOVERY'
     
     if ($TestMode) {
         Write-Log "Test Mode: Validating file discovery completeness" -Level INFO -Component 'TEST'
@@ -924,7 +979,7 @@ function Start-FileProcessing {
         $endIndex = [Math]::Min($i + $ChunkSize - 1, $Files.Count - 1)
         $chunk = $Files[$i..$endIndex]
         
-        Write-Log "Processing chunk $([Math]::Floor($i / $ChunkSize) + 1) of $([Math]::Ceiling($Files.Count / $ChunkSize))" -Level INFO -Component 'PROCESS'
+        Write-Log "Processing chunk $([Math]::Floor($i / $ChunkSize) + 1) of $([Math]::Ceiling($Files.Count / $ChunkSize))" -Level PROGRESS -Component 'PROCESS'
         
         # Process chunk with parallel processing
         $chunkResults = $chunk | ForEach-Object -Parallel {
@@ -1125,13 +1180,20 @@ function Start-FileProcessing {
             # Update progress
             if ($ShowProgress -and $processedCount % $Script:Config.ProgressInterval -eq 0) {
                 $percent = [Math]::Round(($processedCount / $Files.Count) * 100, 1)
-                Write-Progress -Activity "Processing Files" -Status "$processedCount of $($Files.Count) ($percent%)" -PercentComplete $percent
+                $progressBar = "█" * [Math]::Floor($percent / 2) + "░" * (50 - [Math]::Floor($percent / 2))
+                
+                Write-Host "`r⚡ Processing: [" -NoNewline -ForegroundColor Magenta
+                Write-Host $progressBar -NoNewline -ForegroundColor $(if($percent -lt 50){'Yellow'}elseif($percent -lt 80){'Cyan'}else{'Green'})
+                Write-Host "] $percent% ($processedCount/$($Files.Count))" -NoNewline -ForegroundColor White
+                
+                Write-Progress -Activity "🔐 Processing Files" -Status "$processedCount of $($Files.Count) files ($percent%)" -PercentComplete $percent
             }
         }
     }
     
     if ($ShowProgress) {
-        Write-Progress -Activity "Processing Files" -Completed
+        Write-Host "`r" + " " * 80 + "`r" -NoNewline  # Clear progress line
+        Write-Progress -Activity "🔐 Processing Files" -Completed
     }
     
     Write-Log "File processing completed" -Level SUCCESS -Component 'PROCESS'
@@ -1150,6 +1212,29 @@ function Start-FileProcessing {
 $Script:StructuredLogs = @()
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
+# Display startup banner
+Write-Host ""
+Write-Host "██╗  ██╗ █████╗ ███████╗██╗  ██╗███████╗███╗   ███╗██╗████████╗██╗  ██╗" -ForegroundColor Magenta
+Write-Host "██║  ██║██╔══██╗██╔════╝██║  ██║██╔════╝████╗ ████║██║╚══██╔══╝██║  ██║" -ForegroundColor Magenta
+Write-Host "███████║███████║███████╗███████║███████╗██╔████╔██║██║   ██║   ███████║" -ForegroundColor Cyan
+Write-Host "██╔══██║██╔══██║╚════██║██╔══██║╚════██║██║╚██╔╝██║██║   ██║   ██╔══██║" -ForegroundColor Cyan
+Write-Host "██║  ██║██║  ██║███████║██║  ██║███████║██║ ╚═╝ ██║██║   ██║   ██║  ██║" -ForegroundColor Blue
+Write-Host "╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝" -ForegroundColor Blue
+Write-Host ""
+Write-Host "                   🔐 Production File Integrity Verification 🔐" -ForegroundColor Yellow -BackgroundColor DarkBlue
+Write-Host "                        Version $($Script:Config.Version) - Enterprise Grade" -ForegroundColor White -BackgroundColor DarkGreen
+Write-Host ""
+
+# System info
+Write-Host "🖥️  " -NoNewline -ForegroundColor Yellow
+Write-Host "System: " -NoNewline -ForegroundColor Cyan
+Write-Host "$($env:COMPUTERNAME)" -NoNewline -ForegroundColor White
+Write-Host " | PowerShell: " -NoNewline -ForegroundColor Cyan  
+Write-Host "$($PSVersionTable.PSVersion)" -NoNewline -ForegroundColor White
+Write-Host " | CPU Cores: " -NoNewline -ForegroundColor Cyan
+Write-Host "$([Environment]::ProcessorCount)" -ForegroundColor White
+Write-Host ""
+
 try {
     # Normalize source directory
     $SourceDir = (Resolve-Path $SourceDir).Path
@@ -1165,19 +1250,45 @@ try {
     
     # Display configuration
     Write-Host ""
-    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "║                    Production HashSmith v$($Script:Config.Version)                       ║" -ForegroundColor Cyan
-    Write-Host "║                  Bulletproof File Integrity Verification                    ║" -ForegroundColor Cyan
-    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Magenta -BackgroundColor Black
+    Write-Host "║                    🔐 Production HashSmith v$($Script:Config.Version) 🔐                      ║" -ForegroundColor White -BackgroundColor Magenta
+    Write-Host "║                  ⚡ Bulletproof File Integrity Verification ⚡              ║" -ForegroundColor Yellow -BackgroundColor Blue
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta -BackgroundColor Black
     Write-Host ""
-    Write-Log "Source Directory: $SourceDir" -Level INFO
-    Write-Log "Log File: $LogFile" -Level INFO
-    Write-Log "Hash Algorithm: $HashAlgorithm" -Level INFO
-    Write-Log "Max Threads: $MaxThreads" -Level INFO
-    Write-Log "Chunk Size: $ChunkSize" -Level INFO
-    Write-Log "Include Hidden: $IncludeHidden" -Level INFO
-    Write-Log "Verify Integrity: $VerifyIntegrity" -Level INFO
-    Write-Log "Test Mode: $TestMode" -Level INFO
+    
+    # Configuration display with enhanced colors
+    Write-Host "📁 " -NoNewline -ForegroundColor Yellow
+    Write-Host "Source Directory: " -NoNewline -ForegroundColor Cyan
+    Write-Host "$SourceDir" -ForegroundColor White -BackgroundColor DarkBlue
+    
+    Write-Host "📄 " -NoNewline -ForegroundColor Yellow  
+    Write-Host "Log File: " -NoNewline -ForegroundColor Cyan
+    Write-Host "$LogFile" -ForegroundColor White -BackgroundColor DarkGreen
+    
+    Write-Host "🔢 " -NoNewline -ForegroundColor Yellow
+    Write-Host "Hash Algorithm: " -NoNewline -ForegroundColor Cyan
+    Write-Host "$HashAlgorithm" -ForegroundColor Black -BackgroundColor Yellow
+    
+    Write-Host "🧵 " -NoNewline -ForegroundColor Yellow
+    Write-Host "Max Threads: " -NoNewline -ForegroundColor Cyan
+    Write-Host "$MaxThreads" -ForegroundColor White -BackgroundColor DarkMagenta
+    
+    Write-Host "📦 " -NoNewline -ForegroundColor Yellow
+    Write-Host "Chunk Size: " -NoNewline -ForegroundColor Cyan
+    Write-Host "$ChunkSize" -ForegroundColor Black -BackgroundColor Cyan
+    
+    Write-Host "👻 " -NoNewline -ForegroundColor Yellow
+    Write-Host "Include Hidden: " -NoNewline -ForegroundColor Cyan
+    Write-Host "$IncludeHidden" -ForegroundColor $(if($IncludeHidden){'Black'}else{'White'}) -BackgroundColor $(if($IncludeHidden){'Green'}else{'Red'})
+    
+    Write-Host "🔍 " -NoNewline -ForegroundColor Yellow
+    Write-Host "Verify Integrity: " -NoNewline -ForegroundColor Cyan
+    Write-Host "$VerifyIntegrity" -ForegroundColor $(if($VerifyIntegrity){'Black'}else{'White'}) -BackgroundColor $(if($VerifyIntegrity){'Green'}else{'Red'})
+    
+    Write-Host "🧪 " -NoNewline -ForegroundColor Yellow
+    Write-Host "Test Mode: " -NoNewline -ForegroundColor Cyan
+    Write-Host "$TestMode" -ForegroundColor $(if($TestMode){'Black'}else{'White'}) -BackgroundColor $(if($TestMode){'Yellow'}else{'DarkGray'})
+    
     Write-Host ""
     
     # Test write permissions
@@ -1251,10 +1362,28 @@ try {
     # WhatIf mode
     if ($WhatIf) {
         Write-Host ""
-        Write-Host "What-If Mode Results:" -ForegroundColor Yellow
-        Write-Host "  Files to process: $totalFiles" -ForegroundColor Yellow
-        Write-Host "  Total size: $('{0:N2} GB' -f ($totalSize / 1GB))" -ForegroundColor Yellow
-        Write-Host "  Estimated time: $('{0:N1} minutes' -f (($totalSize / 200MB) / 60))" -ForegroundColor Yellow
+        Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow -BackgroundColor Black
+        Write-Host "║                          🔮 WHAT-IF MODE RESULTS 🔮                        ║" -ForegroundColor Black -BackgroundColor Yellow
+        Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow -BackgroundColor Black
+        Write-Host ""
+        
+        Write-Host "📊 " -NoNewline -ForegroundColor Yellow
+        Write-Host "Files to process: " -NoNewline -ForegroundColor Cyan
+        Write-Host "$totalFiles" -ForegroundColor White -BackgroundColor DarkBlue
+        
+        Write-Host "💾 " -NoNewline -ForegroundColor Yellow
+        Write-Host "Total size: " -NoNewline -ForegroundColor Cyan
+        Write-Host "$('{0:N2} GB' -f ($totalSize / 1GB))" -ForegroundColor White -BackgroundColor DarkGreen
+        
+        Write-Host "⏱️  " -NoNewline -ForegroundColor Yellow
+        Write-Host "Estimated time: " -NoNewline -ForegroundColor Cyan
+        Write-Host "$('{0:N1} minutes' -f (($totalSize / 200MB) / 60))" -ForegroundColor White -BackgroundColor DarkMagenta
+        
+        Write-Host "🧵 " -NoNewline -ForegroundColor Yellow
+        Write-Host "Threads to use: " -NoNewline -ForegroundColor Cyan
+        Write-Host "$MaxThreads" -ForegroundColor Black -BackgroundColor Cyan
+        
+        Write-Host ""
         exit 0
     }
     
@@ -1316,7 +1445,7 @@ try {
             Configuration = @{
                 SourceDirectory = $SourceDir
                 HashAlgorithm = $HashAlgorithm
-                IncludeHidden = $IncludeHidden.IsPresent
+                IncludeHidden = $IncludeHidden
                 VerifyIntegrity = $VerifyIntegrity.IsPresent
                 MaxThreads = $MaxThreads
                 ChunkSize = $ChunkSize
@@ -1332,34 +1461,66 @@ try {
         Write-Log "JSON log written: $jsonPath" -Level SUCCESS
     }
     
-    # Final summary
+    # Final summary with enhanced visuals
     Write-Host ""
-    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "║                             OPERATION COMPLETE                              ║" -ForegroundColor Green
-    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Green -BackgroundColor Black
+    Write-Host "║                          🎉 OPERATION COMPLETE 🎉                           ║" -ForegroundColor Black -BackgroundColor Green
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Green -BackgroundColor Black
     Write-Host ""
-    Write-Log "Files discovered: $($Script:Statistics.FilesDiscovered)" -Level INFO
-    Write-Log "Files processed: $($Script:Statistics.FilesProcessed)" -Level INFO
-    Write-Log "Files skipped: $($Script:Statistics.FilesSkipped)" -Level INFO
-    Write-Log "Files failed: $($Script:Statistics.FilesError)" -Level INFO
-    Write-Log "Total data processed: $('{0:N2} GB' -f ($Script:Statistics.BytesProcessed / 1GB))" -Level INFO
-    Write-Log "Processing time: $($stopwatch.Elapsed.ToString('hh\:mm\:ss'))" -Level INFO
-    Write-Log "Average throughput: $('{0:N1} MB/s' -f (($Script:Statistics.BytesProcessed / 1MB) / $stopwatch.Elapsed.TotalSeconds))" -Level INFO
-    Write-Log "Log file: $LogFile" -Level INFO
+    
+    # Statistics with visual formatting
+    Write-Host "📊 " -NoNewline -ForegroundColor Yellow
+    Write-Host "PROCESSING STATISTICS" -ForegroundColor White -BackgroundColor DarkBlue
+    Write-Host "─" * 50 -ForegroundColor Blue
+    
+    Write-Host "🔍 Files discovered: " -NoNewline -ForegroundColor Cyan
+    Write-Host "$($Script:Statistics.FilesDiscovered)" -ForegroundColor White -BackgroundColor DarkCyan
+    
+    Write-Host "✅ Files processed: " -NoNewline -ForegroundColor Green
+    Write-Host "$($Script:Statistics.FilesProcessed)" -ForegroundColor Black -BackgroundColor Green
+    
+    Write-Host "⏭️  Files skipped: " -NoNewline -ForegroundColor Yellow
+    Write-Host "$($Script:Statistics.FilesSkipped)" -ForegroundColor Black -BackgroundColor Yellow
+    
+    Write-Host "❌ Files failed: " -NoNewline -ForegroundColor Red
+    Write-Host "$($Script:Statistics.FilesError)" -ForegroundColor White -BackgroundColor $(if($Script:Statistics.FilesError -eq 0){'Green'}else{'Red'})
+    
+    Write-Host "💾 Total data processed: " -NoNewline -ForegroundColor Magenta
+    Write-Host "$('{0:N2} GB' -f ($Script:Statistics.BytesProcessed / 1GB))" -ForegroundColor White -BackgroundColor DarkMagenta
+    
+    Write-Host "⏱️  Processing time: " -NoNewline -ForegroundColor Blue
+    Write-Host "$($stopwatch.Elapsed.ToString('hh\:mm\:ss'))" -ForegroundColor White -BackgroundColor Blue
+    
+    Write-Host "🚀 Average throughput: " -NoNewline -ForegroundColor Cyan
+    Write-Host "$('{0:N1} MB/s' -f (($Script:Statistics.BytesProcessed / 1MB) / $stopwatch.Elapsed.TotalSeconds))" -ForegroundColor Black -BackgroundColor Cyan
+    
+    Write-Host ""
+    Write-Host "📁 " -NoNewline -ForegroundColor Yellow
+    Write-Host "Log file: " -NoNewline -ForegroundColor White
+    Write-Host "$LogFile" -ForegroundColor Green
     
     if ($UseJsonLog) {
-        Write-Log "JSON log: $([System.IO.Path]::ChangeExtension($LogFile, '.json'))" -Level INFO
+        Write-Host "📊 " -NoNewline -ForegroundColor Yellow
+        Write-Host "JSON log: " -NoNewline -ForegroundColor White
+        Write-Host "$([System.IO.Path]::ChangeExtension($LogFile, '.json'))" -ForegroundColor Green
     }
     
     Write-Host ""
     
-    # Set exit code
+    # Set exit code with visual feedback
     if ($Script:Statistics.FilesError -gt 0) {
-        Write-Log "Operation completed with $($Script:Statistics.FilesError) errors" -Level WARN
-        Write-Log "Use -FixErrors to retry failed files" -Level INFO
+        Write-Host "⚠️  " -NoNewline -ForegroundColor Yellow
+        Write-Host "COMPLETED WITH WARNINGS" -ForegroundColor Black -BackgroundColor Yellow
+        Write-Host "   • $($Script:Statistics.FilesError) files failed processing" -ForegroundColor Red
+        Write-Host "   • Use " -NoNewline -ForegroundColor White
+        Write-Host "-FixErrors" -NoNewline -ForegroundColor Yellow -BackgroundColor DarkRed
+        Write-Host " to retry failed files" -ForegroundColor White
         $Script:ExitCode = 1
     } else {
-        Write-Log "Operation completed successfully - ALL files processed" -Level SUCCESS
+        Write-Host "🎉 " -NoNewline -ForegroundColor Green
+        Write-Host "SUCCESS - ALL FILES PROCESSED" -ForegroundColor Black -BackgroundColor Green
+        Write-Host "   • Zero errors detected" -ForegroundColor Green
+        Write-Host "   • File integrity verification complete" -ForegroundColor Green
     }
 }
 catch {
