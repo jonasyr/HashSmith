@@ -36,16 +36,23 @@
 .PARAMETER RetryCount
     Number of retries for failed files (default: 3).
     
-.EXAMPLE
-    .\MD5-Checksum.ps1 -SourceDir "C:\Data" -Resume
+.PARAMETER IncludeHidden
+    Include hidden and system files in processing.
+    
+.PARAMETER ShowSkipped
+    Show detailed information about skipped files.
     
 .EXAMPLE
-    .\MD5-Checksum.ps1 -SourceDir "C:\Data" -FixErrors -HashAlgorithm SHA256
+    .\HashSmith.ps1 -SourceDir "C:\Data" -Resume
+    
+.EXAMPLE
+    .\HashSmith.ps1 -SourceDir "C:\Data" -FixErrors -HashAlgorithm SHA256
     
 .NOTES
-    Version: 2.0.0
+    Version: 2.0.1
     Author: Production-Ready Implementation
     Requires: PowerShell 5.1 or higher (7+ recommended for parallel processing)
+    Fixed: Improved file discovery to count all files accurately
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -100,18 +107,31 @@ param(
     
     [Parameter()]
     [ValidateRange(0, 10)]
-    [int]$RetryCount = 3
+    [int]$RetryCount = 3,
+    
+    [Parameter()]
+    [switch]$IncludeHidden,
+    
+    [Parameter()]
+    [switch]$ShowSkipped
 )
 
 #region Configuration
 $Script:Config = @{
-    Version = '2.0.0'
+    Version = '2.0.1'
     LogEncoding = 'UTF8'
     BufferSize = 1MB
     LockTimeout = 30
     ProgressUpdateInterval = 100
     MaxPathLength = 32767
     SupportLongPaths = $true
+}
+
+$Script:Statistics = @{
+    FilesFound = 0
+    FilesSkipped = 0
+    FilesInaccessible = 0
+    SkippedReasons = @{}
 }
 #endregion
 
@@ -120,7 +140,7 @@ $Script:Config = @{
 function Write-LogMessage {
     param(
         [string]$Message,
-        [ValidateSet('INFO', 'WARN', 'ERROR', 'SUCCESS')]
+        [ValidateSet('INFO', 'WARN', 'ERROR', 'SUCCESS', 'DEBUG')]
         [string]$Level = 'INFO'
     )
     
@@ -132,6 +152,7 @@ function Write-LogMessage {
         'WARN'    { Write-Host $logEntry -ForegroundColor Yellow }
         'INFO'    { Write-Host $logEntry -ForegroundColor White }
         'SUCCESS' { Write-Host $logEntry -ForegroundColor Green }
+        'DEBUG'   { Write-Host $logEntry -ForegroundColor Gray }
     }
     
     # Also write to verbose stream for debugging
@@ -161,6 +182,137 @@ function Test-FileLocked {
     catch {
         return $true
     }
+}
+
+function Get-AllFilesImproved {
+    param(
+        [string]$Path,
+        [string[]]$ExcludePatterns = @(),
+        [switch]$IncludeHidden,
+        [switch]$ShowSkipped
+    )
+    
+    Write-LogMessage "Starting comprehensive file discovery..." -Level INFO
+    
+    $allFiles = @()
+    $skippedFiles = @()
+    $inaccessiblePaths = @()
+    
+    # Use robocopy-style approach for better file discovery
+    try {
+        # First, try the standard approach
+        $standardFiles = @()
+        $getChildItemParams = @{
+            Path = $Path
+            Recurse = $true
+            File = $true
+            ErrorAction = 'SilentlyContinue'
+        }
+        
+        if ($IncludeHidden) {
+            $getChildItemParams.Force = $true
+        }
+        
+        Write-LogMessage "Scanning with Get-ChildItem (standard method)..." -Level INFO
+        $standardFiles = @(Get-ChildItem @getChildItemParams)
+        
+        Write-LogMessage "Standard scan found $($standardFiles.Count) files" -Level INFO
+        
+        # Now try with Get-ChildItem with error handling to catch missed files
+        Write-LogMessage "Performing detailed scan with error tracking..." -Level INFO
+        
+        $detailedFiles = @()
+        $errorCount = 0
+        
+        # Get all directories first
+        $directories = @(Get-ChildItem -Path $Path -Recurse -Directory -Force -ErrorAction SilentlyContinue)
+        $directories += Get-Item -Path $Path -Force
+        
+        Write-LogMessage "Found $($directories.Count) directories to scan" -Level INFO
+        
+        foreach ($dir in $directories) {
+            try {
+                $dirFiles = @(Get-ChildItem -Path $dir.FullName -File -Force -ErrorAction Stop)
+                
+                foreach ($file in $dirFiles) {
+                    # Check if file should be included
+                    $shouldInclude = $true
+                    
+                    # Check hidden files
+                    if (-not $IncludeHidden -and ($file.Attributes -band [System.IO.FileAttributes]::Hidden)) {
+                        $shouldInclude = $false
+                        $Script:Statistics.SkippedReasons['Hidden'] = $Script:Statistics.SkippedReasons['Hidden'] + 1
+                        if ($ShowSkipped) {
+                            Write-LogMessage "Skipped hidden file: $($file.FullName)" -Level DEBUG
+                        }
+                    }
+                    
+                    # Check exclusion patterns
+                    if ($shouldInclude -and $ExcludePatterns.Count -gt 0) {
+                        foreach ($pattern in $ExcludePatterns) {
+                            if ($file.Name -like $pattern) {
+                                $shouldInclude = $false
+                                $Script:Statistics.SkippedReasons['Excluded'] = $Script:Statistics.SkippedReasons['Excluded'] + 1
+                                if ($ShowSkipped) {
+                                    Write-LogMessage "Skipped excluded file: $($file.FullName)" -Level DEBUG
+                                }
+                                break
+                            }
+                        }
+                    }
+                    
+                    if ($shouldInclude) {
+                        $detailedFiles += $file
+                    } else {
+                        $skippedFiles += $file
+                    }
+                }
+            }
+            catch {
+                $errorCount++
+                $inaccessiblePaths += $dir.FullName
+                if ($ShowSkipped) {
+                    Write-LogMessage "Cannot access directory: $($dir.FullName) - $($_.Exception.Message)" -Level WARN
+                }
+                $Script:Statistics.SkippedReasons['AccessDenied'] = $Script:Statistics.SkippedReasons['AccessDenied'] + 1
+            }
+        }
+        
+        Write-LogMessage "Detailed scan found $($detailedFiles.Count) files" -Level INFO
+        
+        if ($errorCount -gt 0) {
+            Write-LogMessage "Encountered $errorCount inaccessible directories" -Level WARN
+        }
+        
+        # Use the detailed scan results
+        $allFiles = $detailedFiles
+        
+    }
+    catch {
+        Write-LogMessage "Error during file discovery: $($_.Exception.Message)" -Level ERROR
+        # Fallback to standard method
+        $allFiles = $standardFiles
+    }
+    
+    # Update statistics
+    $Script:Statistics.FilesFound = $allFiles.Count
+    $Script:Statistics.FilesSkipped = $skippedFiles.Count
+    $Script:Statistics.FilesInaccessible = $inaccessiblePaths.Count
+    
+    # Show discovery summary
+    Write-LogMessage "File discovery complete:" -Level INFO
+    Write-LogMessage "  - Files found: $($allFiles.Count)" -Level INFO
+    Write-LogMessage "  - Files skipped: $($skippedFiles.Count)" -Level INFO
+    Write-LogMessage "  - Inaccessible paths: $($inaccessiblePaths.Count)" -Level INFO
+    
+    if ($Script:Statistics.SkippedReasons.Count -gt 0) {
+        Write-LogMessage "Skip reasons:" -Level INFO
+        foreach ($reason in $Script:Statistics.SkippedReasons.Keys) {
+            Write-LogMessage "  - ${reason}: $($Script:Statistics.SkippedReasons[${reason}])" -Level INFO
+        }
+    }
+    
+    return $allFiles
 }
 
 function Get-SafeFileHash {
@@ -225,14 +377,14 @@ function Write-LogEntry {
         [string]$FilePath,
         [string]$Hash,
         [long]$Size,
-        [string]$Error,
+        [string]$LogError,   # Renamed from $Error
         [switch]$Atomic
     )
     
     # Format: path = hash, size: X bytes
     # Error format: path = ERROR: message, size: X bytes
-    if ($Error) {
-        $logLine = "$FilePath = ERROR: $Error, size: $Size bytes"
+    if ($LogError) {
+        $logLine = "$FilePath = ERROR: $LogError, size: $Size bytes"
     }
     else {
         $logLine = "$FilePath = $Hash, size: $Size bytes"
@@ -240,13 +392,11 @@ function Write-LogEntry {
     
     if ($Atomic) {
         # Use file locking for atomic writes
-        $lockAcquired = $false
         $stream = $null
         $writer = $null
         
         try {
             $stream = [System.IO.File]::Open($LogPath, 'Append', 'Write', 'Read')
-            $lockAcquired = $true
             
             $writer = [System.IO.StreamWriter]::new($stream, [System.Text.Encoding]::UTF8)
             $writer.WriteLine($logLine)
@@ -310,7 +460,7 @@ function Update-LogEntry {
         [string]$FilePath,
         [string]$NewHash,
         [long]$Size,
-        [string]$Error
+        [string]$LogError   # Renamed from $Error
     )
     
     # For production safety, use a temporary file approach
@@ -329,8 +479,8 @@ function Update-LogEntry {
         $newLines = foreach ($line in $lines) {
             if ($line -match "^$([regex]::Escape($FilePath))\s*=") {
                 $updated = $true
-                if ($Error) {
-                    "$FilePath = ERROR: $Error, size: $Size bytes"
+                if ($LogError) {
+                    "$FilePath = ERROR: $LogError, size: $Size bytes"
                 }
                 else {
                     "$FilePath = $NewHash, size: $Size bytes"
@@ -379,6 +529,7 @@ function Write-JsonLog {
         Timestamp = (Get-Date -Format 'o')
         Algorithm = $HashAlgorithm
         Statistics = $Statistics
+        DiscoveryStats = $Script:Statistics
         Files = @()
     }
     
@@ -407,6 +558,13 @@ function Write-JsonLog {
 
 #region Main Processing
 
+# Initialize statistics
+$Script:Statistics.SkippedReasons = @{
+    'Hidden' = 0
+    'Excluded' = 0
+    'AccessDenied' = 0
+}
+
 # Initialize
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $SourceDir = Resolve-Path $SourceDir
@@ -424,7 +582,7 @@ $LogFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPa
 # Display configuration
 Write-Host ""
 Write-Host "+============================================================+" -ForegroundColor Cyan
-Write-Host "|          Production-Ready Checksum Generator v$($Script:Config.Version)        |" -ForegroundColor Cyan
+Write-Host "|        Production-Ready Checksum Generator v$($Script:Config.Version)         |" -ForegroundColor Cyan
 Write-Host "+============================================================+" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "[*] Source Directory: $SourceDir" -ForegroundColor Green
@@ -432,6 +590,8 @@ Write-Host "[*] Log File: $LogFile" -ForegroundColor Green
 Write-Host "[*] Algorithm: $HashAlgorithm" -ForegroundColor Green
 Write-Host "[*] Max Threads: $MaxThreads" -ForegroundColor Green
 Write-Host "[*] Mode: $(if($useParallel){'Parallel'}else{'Sequential'})" -ForegroundColor Green
+Write-Host "[*] Include Hidden: $IncludeHidden" -ForegroundColor Green
+Write-Host "[*] Show Skipped: $ShowSkipped" -ForegroundColor Green
 Write-Host ""
 
 # Validate write permissions
@@ -459,17 +619,8 @@ if ($Resume -or $FixErrors) {
     }
 }
 
-# Collect files
-Write-LogMessage "Scanning directory for files..." -Level INFO
-$allFiles = Get-ChildItem -Path $SourceDir -Recurse -File -ErrorAction SilentlyContinue
-
-# Apply exclusions
-if ($ExcludePatterns.Count -gt 0) {
-    Write-LogMessage "Applying exclusion patterns: $($ExcludePatterns -join ', ')" -Level INFO
-    foreach ($pattern in $ExcludePatterns) {
-        $allFiles = $allFiles | Where-Object { $_.Name -notlike $pattern }
-    }
-}
+# Collect files with improved method
+$allFiles = Get-AllFilesImproved -Path $SourceDir -ExcludePatterns $ExcludePatterns -IncludeHidden:$IncludeHidden -ShowSkipped:$ShowSkipped
 
 # Determine files to process
 $filesToProcess = @()
@@ -498,7 +649,7 @@ if ($totalFiles -eq 0) {
     exit 0
 }
 
-Write-LogMessage "Found $totalFiles files to process ($('{0:N2} GB' -f ($totalSize / 1GB)))" -Level INFO
+Write-LogMessage "Files to process: $totalFiles ($('{0:N2} GB' -f ($totalSize / 1GB)))" -Level INFO
 
 # WhatIf mode
 if ($WhatIf) {
@@ -518,6 +669,7 @@ if (-not (Test-Path $LogFile)) {
         "# Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
         "# Algorithm: $HashAlgorithm",
         "# Source: $SourceDir",
+        "# Discovery Stats: Found=$($Script:Statistics.FilesFound), Skipped=$($Script:Statistics.FilesSkipped), Inaccessible=$($Script:Statistics.FilesInaccessible)",
         ""
     )
     $header | Set-Content -Path $LogFile -Encoding UTF8
@@ -527,7 +679,6 @@ if (-not (Test-Path $LogFile)) {
 $processedCount = 0
 $errorCount = 0
 $processedSize = 0
-$results = @()
 
 Write-LogMessage "Starting file processing..." -Level INFO
 
@@ -585,7 +736,7 @@ $processFileScript = {
         Size = $File.Length
         Success = $false
         Hash = $null
-        Error = $null
+        LogError = $null   # Renamed from Error
     }
     
     try {
@@ -593,7 +744,7 @@ $processFileScript = {
         $result.Success = $true
     }
     catch {
-        $result.Error = $_.Exception.Message
+        $result.LogError = $_.Exception.Message
     }
     
     return $result
@@ -666,7 +817,7 @@ for ($i = 0; $i -lt $totalFiles; $i += $batchSize) {
                 Size = $_.Length
                 Success = $false
                 Hash = $null
-                Error = $null
+                LogError = $null   # Renamed from Error
             }
             
             try {
@@ -674,7 +825,7 @@ for ($i = 0; $i -lt $totalFiles; $i += $batchSize) {
                 $result.Success = $true
             }
             catch {
-                $result.Error = $_.Exception.Message
+                $result.LogError = $_.Exception.Message
             }
             
             return $result
@@ -692,7 +843,7 @@ for ($i = 0; $i -lt $totalFiles; $i += $batchSize) {
         
         if ($FixErrors) {
             # Update existing entry
-            $updated = Update-LogEntry -LogPath $LogFile -FilePath $result.Path -NewHash $result.Hash -Size $result.Size -Error $result.Error
+            $updated = Update-LogEntry -LogPath $LogFile -FilePath $result.Path -NewHash $result.Hash -Size $result.Size -LogError $result.LogError
             
             if ($result.Success) {
                 $processedSize += $result.Size
@@ -700,12 +851,12 @@ for ($i = 0; $i -lt $totalFiles; $i += $batchSize) {
             }
             else {
                 $errorCount++
-                Write-LogMessage "Failed to fix: $($result.Name) - $($result.Error)" -Level WARN
+                Write-LogMessage "Failed to fix: $($result.Name) - $($result.LogError)" -Level WARN
             }
         }
         else {
             # Write new entry
-            Write-LogEntry -LogPath $LogFile -FilePath $result.Path -Hash $result.Hash -Size $result.Size -Error $result.Error -Atomic
+            Write-LogEntry -LogPath $LogFile -FilePath $result.Path -Hash $result.Hash -Size $result.Size -LogError $result.LogError -Atomic
             
             if ($result.Success) {
                 $processedSize += $result.Size
@@ -713,7 +864,7 @@ for ($i = 0; $i -lt $totalFiles; $i += $batchSize) {
             }
             else {
                 $errorCount++
-                Write-LogMessage "Error: $($result.Name) - $($result.Error)" -Level WARN
+                Write-LogMessage "Error: $($result.Name) - $($result.LogError)" -Level WARN
             }
         }
         
@@ -743,7 +894,7 @@ if (-not $FixErrors) {
         $totalHash = [System.BitConverter]::ToString($totalHashAlgo.ComputeHash($totalHashBytes)) -replace '-', ''
         
         Add-Content -Path $LogFile -Value ""
-        Add-Content -Path $LogFile -Value "Total$HashAlgorithm = $($totalHash.ToLower())"
+        Add-Content -Path $LogFile -Value "Total${HashAlgorithm} = $($totalHash.ToLower())"
         
         $summaryLine = "$($processedCount - $errorCount) files checked ($processedSize bytes, $('{0:N2} GB' -f ($processedSize / 1GB)), $($stopwatch.Elapsed.TotalSeconds.ToString('F1')) sec)."
         Add-Content -Path $LogFile -Value $summaryLine
@@ -780,7 +931,10 @@ Write-Host "+============================================================+" -For
 Write-Host "|                  OPERATION COMPLETE                        |" -ForegroundColor Green
 Write-Host "+============================================================+" -ForegroundColor Green
 Write-Host ""
+Write-Host "[*] Files discovered: $($Script:Statistics.FilesFound)" -ForegroundColor Cyan
 Write-Host "[*] Files processed: $($processedCount - $errorCount)" -ForegroundColor White
+Write-Host "[*] Files skipped: $($Script:Statistics.FilesSkipped)" -ForegroundColor Yellow
+Write-Host "[*] Inaccessible paths: $($Script:Statistics.FilesInaccessible)" -ForegroundColor Yellow
 Write-Host "[*] Errors: $errorCount" -ForegroundColor $(if($errorCount -gt 0){'Red'}else{'Green'})
 Write-Host "[*] Total size: $('{0:N2} GB' -f ($processedSize / 1GB))" -ForegroundColor Cyan
 Write-Host "[*] Duration: $($stopwatch.Elapsed.ToString('hh\:mm\:ss'))" -ForegroundColor Cyan
