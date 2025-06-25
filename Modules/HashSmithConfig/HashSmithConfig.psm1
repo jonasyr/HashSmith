@@ -24,6 +24,9 @@ $Script:Config = @{
     CircuitBreakerTimeout = 30
 }
 
+# Modern HashSmith configuration (initialized by Initialize-HashSmithConfig)
+$Script:HashSmithConfig = $null
+
 $Script:Statistics = @{
     StartTime = Get-Date
     FilesDiscovered = 0
@@ -58,6 +61,67 @@ $Script:StructuredLogs = @()
 
 <#
 .SYNOPSIS
+    Initializes the HashSmith configuration system
+
+.DESCRIPTION
+    Sets up the default configuration and applies any overrides. 
+    This function must be called before using other HashSmith functions.
+
+.PARAMETER ConfigOverrides
+    Optional hashtable of configuration overrides to apply
+
+.EXAMPLE
+    Initialize-HashSmithConfig
+    Initialize-HashSmithConfig -ConfigOverrides @{ Algorithm = 'SHA256' }
+#>
+function Initialize-HashSmithConfig {
+    [CmdletBinding()]
+    param(
+        [hashtable]$ConfigOverrides = @{}
+    )
+    
+    # Initialize the configuration with defaults
+    $Script:HashSmithConfig = @{
+        Algorithm = 'MD5'
+        TargetPath = $PWD.Path
+        LogPath = ''
+        IncludeHidden = $true
+        IncludeSymlinks = $false
+        VerifyIntegrity = $false
+        StrictMode = $false
+        TestMode = $false
+        EnableParallelDiscovery = $true
+        EnableParallelProcessing = $true
+        MaxParallelJobs = [Environment]::ProcessorCount
+        ChunkSize = 1000
+        BufferSize = 1048576  # 1MB
+        DateFormat = 'yyyy-MM-dd HH:mm:ss.fff'
+        EnableProgressSpinner = $true
+        SpinnerThresholdMB = 5
+        ShowProgress = $true
+        LogLevel = 'INFO'
+        RetryCount = 3
+        TimeoutSeconds = 30
+        ExcludePatterns = @()
+        MaxLogBatchSize = 100
+        LogBatchInterval = 5000
+    }
+    
+    # Apply any overrides
+    foreach ($key in $ConfigOverrides.Keys) {
+        if ($Script:HashSmithConfig.ContainsKey($key)) {
+            $Script:HashSmithConfig[$key] = $ConfigOverrides[$key]
+            Write-Verbose "Applied config override: $key = $($ConfigOverrides[$key])"
+        } else {
+            Write-Warning "Unknown configuration key: $key"
+        }
+    }
+    
+    Write-Verbose "HashSmith configuration initialized"
+}
+
+<#
+.SYNOPSIS
     Gets the current HashSmith configuration
 
 .DESCRIPTION
@@ -71,7 +135,12 @@ function Get-HashSmithConfig {
     [OutputType([hashtable])]
     param()
     
-    return $Script:Config.Clone()
+    # Return the HashSmithConfig if it exists, otherwise fall back to Config
+    if ($null -ne $Script:HashSmithConfig) {
+        return $Script:HashSmithConfig.Clone()
+    } else {
+        return $Script:Config.Clone()
+    }
 }
 
 <#
@@ -246,18 +315,6 @@ function Add-HashSmithStructuredLog {
 .EXAMPLE
     Initialize-HashSmithConfig -ConfigOverrides @{ BufferSize = 8MB }
 #>
-function Initialize-HashSmithConfig {
-    [CmdletBinding()]
-    param(
-        [hashtable]$ConfigOverrides = @{}
-    )
-    
-    foreach ($key in $ConfigOverrides.Keys) {
-        if ($Script:Config.ContainsKey($key)) {
-            $Script:Config[$key] = $ConfigOverrides[$key]
-        }
-    }
-}
 
 <#
 .SYNOPSIS
@@ -367,43 +424,6 @@ function Add-HashSmithStatistic {
 .EXAMPLE
     Initialize-HashSmithConfig
 #>
-function Initialize-HashSmithConfig {
-    [CmdletBinding()]
-    param()
-    
-    # Reset to default configuration
-    $Script:Config = @{
-        Version = '4.1.0'
-        BufferSize = 4MB
-        MaxRetryDelay = 5000
-        ProgressInterval = 25
-        LogEncoding = [System.Text.Encoding]::UTF8
-        DateFormat = 'yyyy-MM-dd HH:mm:ss.fff'
-        SupportLongPaths = $true
-        NetworkTimeoutMs = 30000
-        IntegrityHashSize = 1KB
-        CircuitBreakerThreshold = 10
-        CircuitBreakerTimeout = 30
-        
-        # Additional runtime configuration
-        TargetPath = $null
-        Algorithm = 'MD5'
-        EnableParallelDiscovery = $true
-        MaxParallelJobs = 4
-        EnableProgressSpinner = $true
-        SpinnerThresholdMB = 50
-    }
-    
-    # Reset statistics
-    Reset-HashSmithStatistics
-    
-    # Reset circuit breaker
-    $Script:CircuitBreaker = @{
-        FailureCount = 0
-        LastFailureTime = $null
-        IsOpen = $false
-    }
-}
 
 <#
 .SYNOPSIS
@@ -434,7 +454,12 @@ function Set-HashSmithConfig {
         $Value
     )
     
-    $Script:Config[$Key] = $Value
+    # Set in the modern config if it exists, otherwise fall back to old config
+    if ($null -ne $Script:HashSmithConfig) {
+        $Script:HashSmithConfig[$Key] = $Value
+    } else {
+        $Script:Config[$Key] = $Value
+    }
 }
 
 #endregion

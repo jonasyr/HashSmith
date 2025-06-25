@@ -142,62 +142,93 @@ function Start-HashSmithFileProcessing {
         
         # Guard parallel processing behind PowerShell version check
         if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-            # Reduce max threads to prevent system overload and freezes
-            $safeThreads = [Math]::Min($MaxThreads, [Math]::Max(2, [Environment]::ProcessorCount / 2))
+            # Reduce max threads to prevent system overload and freezes  
+            $safeThreads = [Math]::Min($MaxThreads, [Math]::Max(2, [Environment]::ProcessorCount / 3))  # Even more conservative
             
             Write-HashSmithLog -Message "Using $safeThreads threads (reduced from $MaxThreads for system stability)" -Level INFO -Component 'PROCESS'
             
-            # Process chunk with parallel processing (PowerShell 7+) - with reduced load
-            $chunkResults = $chunk | ForEach-Object -Parallel {
-                # Import required variables into parallel runspace
-                $Algorithm = $using:Algorithm
-                $RetryCount = $using:RetryCount
+            # Start a background job to show progress during parallel processing
+            $progressJob = Start-Job -ScriptBlock {
+                param($ChunkSize, $TotalFiles, $ChunkNumber, $TotalChunks)
                 
-                # Process single file with minimal complexity
-                $file = $_
-                $result = @{
-                    Path = $file.FullName
-                    Size = $file.Length
-                    Modified = $file.LastWriteTime
-                    Success = $false
-                    Hash = $null
-                    Error = $null
-                    ErrorCategory = 'Unknown'
-                    Duration = 0
-                    IsSymlink = $false
-                    RaceConditionDetected = $false
-                    IntegrityVerified = $false
-                    Attempts = 1
-                }
-                
+                $spinChars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
+                $spinIndex = 0
                 $startTime = Get-Date
                 
-                try {
-                    # Simple hash computation without complex retry logic
-                    $hashAlgorithm = [System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)
+                while ($true) {
+                    $char = $spinChars[$spinIndex % $spinChars.Length]
+                    $elapsed = (Get-Date) - $startTime
+                    $elapsedStr = if ($elapsed.TotalMinutes -gt 1) { "$([Math]::Floor($elapsed.TotalMinutes))m $([Math]::Floor($elapsed.Seconds))s" } else { "$([Math]::Floor($elapsed.TotalSeconds))s" }
+                    
+                    $progressMsg = "$char Processing chunk $ChunkNumber of $TotalChunks ($ChunkSize files) - $elapsedStr elapsed"
+                    Write-Host "`r$progressMsg" -NoNewline -ForegroundColor Yellow
+                    
+                    Start-Sleep -Milliseconds 150
+                    $spinIndex++
+                }
+            } -ArgumentList $chunk.Count, $Files.Count, $chunkNumber, $totalChunks
+            
+            try {
+                # Process chunk with parallel processing (PowerShell 7+) - with reduced load
+                $chunkResults = $chunk | ForEach-Object -Parallel {
+                    # Import required variables into parallel runspace
+                    $Algorithm = $using:Algorithm
+                    $RetryCount = $using:RetryCount
+                    
+                    # Process single file with minimal complexity
+                    $file = $_
+                    $result = @{
+                        Path = $file.FullName
+                        Size = $file.Length
+                        Modified = $file.LastWriteTime
+                        Success = $false
+                        Hash = $null
+                        Error = $null
+                        ErrorCategory = 'Unknown'
+                        Duration = 0
+                        IsSymlink = $false
+                        RaceConditionDetected = $false
+                        IntegrityVerified = $false
+                        Attempts = 1
+                    }
+                    
+                    $startTime = Get-Date
+                    
                     try {
-                        $fileBytes = [System.IO.File]::ReadAllBytes($file.FullName)
-                        $hashBytes = $hashAlgorithm.ComputeHash($fileBytes)
-                        $result.Hash = [System.BitConverter]::ToString($hashBytes) -replace '-', ''
-                        $result.Hash = $result.Hash.ToLower()
-                        $result.Success = $true
-                        
-                        # Small delay to reduce system strain
-                        Start-Sleep -Milliseconds 25
+                        # Simple hash computation without complex retry logic
+                        $hashAlgorithm = [System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)
+                        try {
+                            $fileBytes = [System.IO.File]::ReadAllBytes($file.FullName)
+                            $hashBytes = $hashAlgorithm.ComputeHash($fileBytes)
+                            $result.Hash = [System.BitConverter]::ToString($hashBytes) -replace '-', ''
+                            $result.Hash = $result.Hash.ToLower()
+                            $result.Success = $true
+                            
+                            # Small delay to reduce system strain and prevent freezes
+                            Start-Sleep -Milliseconds 75
+                        }
+                        finally {
+                            if ($hashAlgorithm) { $hashAlgorithm.Dispose() }
+                        }
                     }
-                    finally {
-                        if ($hashAlgorithm) { $hashAlgorithm.Dispose() }
+                    catch {
+                        $result.Error = $_.Exception.Message
+                        $result.ErrorCategory = 'ProcessingError'
                     }
+                    
+                    $result.Duration = (Get-Date) - $startTime
+                    return $result
+                    
+                } -ThrottleLimit $safeThreads
+            }
+            finally {
+                # Stop the progress job and clean up the line
+                if ($progressJob) {
+                    Stop-Job $progressJob -ErrorAction SilentlyContinue
+                    Remove-Job $progressJob -Force -ErrorAction SilentlyContinue
                 }
-                catch {
-                    $result.Error = $_.Exception.Message
-                    $result.ErrorCategory = 'ProcessingError'
-                }
-                
-                $result.Duration = (Get-Date) - $startTime
-                return $result
-                
-            } -ThrottleLimit $safeThreads
+                Write-Host "`r$(' ' * 80)`r" -NoNewline  # Clear the progress line
+            }
         } else {
             # Process chunk sequentially (PowerShell 5.1 or parallel disabled)
             $chunkResults = @()
@@ -303,10 +334,10 @@ function Start-HashSmithFileProcessing {
         # Flush log batch periodically
         Clear-HashSmithLogBatch -LogPath $LogPath
         
-        # Add a brief pause between chunks to reduce system load
+        # Add a brief pause between chunks to reduce system load and prevent freezes
         if ($chunkNumber -lt $totalChunks) {
-            Write-HashSmithLog -Message "✅ Chunk $chunkNumber completed, pausing briefly to reduce system load..." -Level INFO -Component 'PROCESS'
-            Start-Sleep -Milliseconds 200
+            Write-HashSmithLog -Message "✅ Chunk $chunkNumber completed, pausing to reduce system load..." -Level INFO -Component 'PROCESS'
+            Start-Sleep -Milliseconds 500  # Increased pause to prevent system freezes
         }
         
         # Check if we should stop due to too many errors
