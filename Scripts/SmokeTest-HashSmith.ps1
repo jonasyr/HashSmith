@@ -122,8 +122,8 @@ try {
     Write-Host "Verifying output files..." -ForegroundColor Green
     
     # Look for actual generated files (timestamp-based log files)
-    $LogFiles = Get-ChildItem $TestPath -Filter "*.log" | Where-Object { $_.Name -like "*MD5*" }
-    $JsonFiles = Get-ChildItem $TestPath -Filter "*.json" | Where-Object { $_.Name -like "*MD5*" }
+    $LogFiles = @(Get-ChildItem $TestPath -Filter "*.log" | Where-Object { $_.Name -like "*MD5*" })
+    $JsonFiles = @(Get-ChildItem $TestPath -Filter "*.json" | Where-Object { $_.Name -like "*MD5*" })
     
     $AllOutputsFound = $true
     $FilesFound = 0
