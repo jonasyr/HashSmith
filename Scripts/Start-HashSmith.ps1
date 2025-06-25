@@ -439,14 +439,64 @@ try {
     
     $totalFiles = $filesToProcess.Count
     $totalSize = ($filesToProcess | Measure-Object -Property Length -Sum).Sum
-    $estimatedTime = ($totalSize / 200MB) / 60
     
-    # Processing overview
+    # Enhanced estimation based on file characteristics
+    $smallFiles = ($filesToProcess | Where-Object { $_.Length -lt 1MB }).Count
+    $mediumFiles = ($filesToProcess | Where-Object { $_.Length -ge 1MB -and $_.Length -lt 100MB }).Count
+    $largeFiles = ($filesToProcess | Where-Object { $_.Length -ge 100MB }).Count
+    
+    # Realistic throughput estimates based on file patterns
+    $smallFileRate = 50   # files per second for small files
+    $mediumThroughput = 100MB  # MB/s for medium files
+    $largeThroughput = 200MB   # MB/s for large files
+    
+    # Calculate actual threads used (same logic as processor module)
+    $actualThreads = if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
+        $threads = [Math]::Round([Environment]::ProcessorCount * 0.75)  # Use 75% of cores for stability
+        if ($threads -lt 1) { $threads = 1 }
+        [Math]::Min($MaxThreads, $threads)
+    } else {
+        1  # Sequential processing
+    }
+    
+    # Calculate time components using actual thread count
+    $smallFileTime = $smallFiles / $smallFileRate / $actualThreads
+    $mediumFileSize = ($filesToProcess | Where-Object { $_.Length -ge 1MB -and $_.Length -lt 100MB } | Measure-Object -Property Length -Sum).Sum
+    $mediumFileTime = ($mediumFileSize / $mediumThroughput) / $actualThreads
+    $largeFileSize = ($filesToProcess | Where-Object { $_.Length -ge 100MB } | Measure-Object -Property Length -Sum).Sum
+    $largeFileTime = ($largeFileSize / $largeThroughput) / $actualThreads
+    
+    # Add overhead for thread coordination and I/O
+    $overheadFactor = 1.5
+    $estimatedTime = ($smallFileTime + $mediumFileTime + $largeFileTime) * $overheadFactor / 60
+    
+    # Processing overview with enhanced file breakdown
     Write-ProfessionalHeader -Title "Processing Overview" -Color "Magenta"
     Write-StatItem -Icon "📁" -Label "Files to Process" -Value $totalFiles -Color "Cyan"
     Write-StatItem -Icon "💾" -Label "Total Size" -Value "$('{0:N2} GB' -f ($totalSize / 1GB))" -Color "Green"
-    Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N1} minutes' -f $estimatedTime)" -Color "Blue"
-    Write-StatItem -Icon "🧵" -Label "Threads" -Value $MaxThreads -Color "Magenta"
+    
+    # Show file size distribution for better understanding
+    if ($smallFiles -gt 0) {
+        Write-StatItem -Icon "🔸" -Label "Small Files (<1MB)" -Value $smallFiles -Color "Yellow"
+    }
+    if ($mediumFiles -gt 0) {
+        Write-StatItem -Icon "🔹" -Label "Medium Files (1MB-100MB)" -Value $mediumFiles -Color "Cyan"
+    }
+    if ($largeFiles -gt 0) {
+        Write-StatItem -Icon "🔶" -Label "Large Files (>100MB)" -Value $largeFiles -Color "Orange"
+    }
+    
+    # More realistic time estimate with caveats
+    if ($estimatedTime -lt 1) {
+        Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N0} seconds' -f ($estimatedTime * 60))" -Color "Blue"
+    } elseif ($estimatedTime -lt 60) {
+        Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N1} minutes' -f $estimatedTime)" -Color "Blue"
+    } else {
+        Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N1} hours' -f ($estimatedTime / 60))" -Color "Blue"
+    }
+    Write-Host "   ⚠️  Estimate varies by storage speed & file patterns" -ForegroundColor Gray
+    
+    Write-StatItem -Icon "🧵" -Label "Threads" -Value "$actualThreads (of $MaxThreads max)" -Color "Magenta"
     Write-StatItem -Icon "📦" -Label "Chunk Size" -Value $ChunkSize -Color "Yellow"
     Write-Host ""
     
@@ -461,10 +511,41 @@ try {
         
         $memoryEstimate = 50 + (($totalFiles / 10000) * 2)
         
+        # Calculate file distribution for WhatIf using actual threads
+        $actualThreads = if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
+            $threads = [Math]::Round([Environment]::ProcessorCount * 0.75)  # Use 75% of cores for stability
+            if ($threads -lt 1) { $threads = 1 }
+            [Math]::Min($MaxThreads, $threads)
+        } else {
+            1  # Sequential processing
+        }
+        
+        $smallFiles = ($filesToProcess | Where-Object { $_.Length -lt 1MB }).Count
+        $mediumFiles = ($filesToProcess | Where-Object { $_.Length -ge 1MB -and $_.Length -lt 100MB }).Count
+        $largeFiles = ($filesToProcess | Where-Object { $_.Length -ge 100MB }).Count
+        
         Write-StatItem -Icon "📊" -Label "Files to Process" -Value $totalFiles -Color "Cyan"
         Write-StatItem -Icon "💾" -Label "Total Size" -Value "$('{0:N2} GB' -f ($totalSize / 1GB))" -Color "Green"
-        Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N1} minutes' -f $estimatedTime)" -Color "Magenta"
-        Write-StatItem -Icon "🧵" -Label "Threads to Use" -Value $MaxThreads -Color "Cyan"
+        
+        if ($smallFiles -gt 0) {
+            Write-StatItem -Icon "🔸" -Label "Small Files (<1MB)" -Value $smallFiles -Color "Yellow"
+        }
+        if ($mediumFiles -gt 0) {
+            Write-StatItem -Icon "🔹" -Label "Medium Files (1MB-100MB)" -Value $mediumFiles -Color "Cyan"
+        }
+        if ($largeFiles -gt 0) {
+            Write-StatItem -Icon "🔶" -Label "Large Files (>100MB)" -Value $largeFiles -Color "Orange"
+        }
+        
+        if ($estimatedTime -lt 1) {
+            Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N0} seconds' -f ($estimatedTime * 60))" -Color "Magenta"
+        } elseif ($estimatedTime -lt 60) {
+            Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N1} minutes' -f $estimatedTime)" -Color "Magenta"
+        } else {
+            Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N1} hours' -f ($estimatedTime / 60))" -Color "Magenta"
+        }
+        Write-Host "   ⚠️  Time varies significantly by storage & file patterns" -ForegroundColor Gray
+        Write-StatItem -Icon "🧵" -Label "Threads to Use" -Value "$actualThreads (of $MaxThreads max)" -Color "Cyan"
         Write-StatItem -Icon "🧠" -Label "Est. Memory Usage" -Value "$('{0:N0} MB' -f $memoryEstimate)" -Color "Yellow"
         Write-StatItem -Icon "🔑" -Label "Hash Algorithm" -Value $HashAlgorithm -Color "Blue"
         
