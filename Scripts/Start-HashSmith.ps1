@@ -317,13 +317,99 @@ Write-Host "╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚�
 
 Write-ProfessionalHeader -Title "🔐 Production File Integrity Verification System 🔐" -Subtitle "Version $($config.Version) Enhanced - Enterprise Grade with Professional Output" -Color "Magenta"
 
-# Enhanced system information display
-$memoryGB = [Math]::Round(((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB), 1)
+# Cross-platform system information display
+$osWindows = $PSVersionTable.PSVersion.Major -ge 6 ? $IsWindows : ($env:OS -eq "Windows_NT")
+$osLinux = $PSVersionTable.PSVersion.Major -ge 6 ? $IsLinux : $false
+$osMacOS = $PSVersionTable.PSVersion.Major -ge 6 ? $IsMacOS : $false
+
+# Get memory information based on OS
+$memoryGB = 0
+try {
+    if ($osWindows) {
+        # Windows: Use CIM/WMI
+        if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) {
+            $memoryGB = [Math]::Round(((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB), 1)
+        } else {
+            # Fallback for older PowerShell
+            $memoryGB = [Math]::Round(((Get-WmiObject Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB), 1)
+        }
+    } elseif ($osLinux) {
+        # Linux: Parse /proc/meminfo
+        if (Test-Path '/proc/meminfo') {
+            $memInfo = Get-Content '/proc/meminfo' | Where-Object { $_ -match '^MemTotal:' }
+            if ($memInfo -match '(\d+)\s*kB') {
+                $memoryGB = [Math]::Round(([int64]$matches[1] * 1024 / 1GB), 1)
+            }
+        }
+    } elseif ($osMacOS) {
+        # macOS: Use system_profiler or sysctl
+        try {
+            $hwMemory = & sysctl -n hw.memsize 2>$null
+            if ($hwMemory) {
+                $memoryGB = [Math]::Round(([int64]$hwMemory / 1GB), 1)
+            }
+        } catch {
+            # Fallback to system_profiler if sysctl fails
+            $memoryGB = 0
+        }
+    }
+} catch {
+    Write-HashSmithLog -Message "Failed to get memory information: $($_.Exception.Message)" -Level WARN
+    $memoryGB = 0
+}
+
+# Get computer name cross-platform
+$computerName = if ($osWindows) { 
+    $env:COMPUTERNAME 
+} else { 
+    # For Linux/Unix, try multiple methods to get hostname
+    $hostname = $null
+    
+    # Try environment variables first
+    if ($env:HOSTNAME) {
+        $hostname = $env:HOSTNAME
+    }
+    
+    # Try hostname command
+    if (-not $hostname) {
+        try {
+            $hostname = & hostname 2>$null
+            if ($hostname -and $hostname.GetType().Name -eq 'String') {
+                $hostname = $hostname.Trim()
+            }
+        } catch {
+            $hostname = $null
+        }
+    }
+    
+    # Try /etc/hostname file
+    if (-not $hostname) {
+        try {
+            if (Test-Path '/etc/hostname') {
+                $hostname = Get-Content '/etc/hostname' -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($hostname) {
+                    $hostname = $hostname.Trim()
+                }
+            }
+        } catch {
+            $hostname = $null
+        }
+    }
+    
+    # Fallback to a safe default
+    if (-not $hostname -or [string]::IsNullOrWhiteSpace($hostname)) {
+        $hostname = "Linux-Host"
+    }
+    
+    $hostname
+}
+
 Write-Host "🖥️ System Information" -ForegroundColor Yellow
-Write-Host "   Computer Name    : $($env:COMPUTERNAME)" -ForegroundColor White
+Write-Host "   Computer Name    : $computerName" -ForegroundColor White
+Write-Host "   Operating System : $(if($osWindows){'Windows'}elseif($osLinux){'Linux'}elseif($osMacOS){'macOS'}else{'Unknown'})" -ForegroundColor White
 Write-Host "   PowerShell       : $($PSVersionTable.PSVersion)" -ForegroundColor White
 Write-Host "   CPU Cores        : $([Environment]::ProcessorCount)" -ForegroundColor White
-Write-Host "   Total Memory     : $memoryGB GB" -ForegroundColor White
+Write-Host "   Total Memory     : $(if($memoryGB -gt 0){"$memoryGB GB"}else{"Unknown"})" -ForegroundColor White
 Write-Host ""
 
 try {
@@ -347,9 +433,9 @@ try {
     Write-ConfigItem -Icon "🔑" -Label "Hash Algorithm" -Value $HashAlgorithm -Color "Yellow"
     Write-ConfigItem -Icon "🧵" -Label "Max Threads" -Value $MaxThreads -Color "Magenta"
     Write-ConfigItem -Icon "📦" -Label "Chunk Size" -Value $ChunkSize -Color "Cyan"
-    Write-ConfigItem -Icon "👁️" -Label "Include Hidden" -Value $IncludeHidden -Color $(if($IncludeHidden){"Green"}else{"Red"})
+    Write-ConfigItem -Icon "👁️ " -Label "Include Hidden" -Value $IncludeHidden -Color $(if($IncludeHidden){"Green"}else{"Red"})
     Write-ConfigItem -Icon "🔗" -Label "Include Symlinks" -Value $IncludeSymlinks -Color $(if($IncludeSymlinks){"Green"}else{"Red"})
-    Write-ConfigItem -Icon "🛡️" -Label "Verify Integrity" -Value $VerifyIntegrity -Color $(if($VerifyIntegrity){"Green"}else{"Gray"})
+    Write-ConfigItem -Icon "🛡️ " -Label "Verify Integrity" -Value $VerifyIntegrity -Color $(if($VerifyIntegrity){"Green"}else{"Gray"})
     Write-ConfigItem -Icon "⚡" -Label "Strict Mode" -Value $StrictMode -Color $(if($StrictMode){"Yellow"}else{"Gray"})
     Write-ConfigItem -Icon "🧪" -Label "Test Mode" -Value $TestMode -Color $(if($TestMode){"Yellow"}else{"Gray"})
     Write-ConfigItem -Icon "📊" -Label "Sort by Size" -Value $SortFilesBySize -Color $(if($SortFilesBySize){"Green"}else{"Gray"})
@@ -671,7 +757,7 @@ try {
         Write-Host "   • Circuit breaker pattern for resilience" -ForegroundColor Cyan
         Write-Host "   • Network path monitoring and recovery" -ForegroundColor Cyan
         
-        if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
+        if ($useParallelForWhatIf -and $PSVersionTable.PSVersion.Major -ge 7) {
             Write-Host "   • Parallel processing enabled (PowerShell 7+)" -ForegroundColor Green
         } elseif ($UseParallel) {
             Write-Host "   • Parallel processing requested but not available (PowerShell 5.1)" -ForegroundColor Yellow

@@ -89,10 +89,15 @@ function Get-HashSmithAllFiles {
         # Use .NET Directory.EnumerateFiles for memory efficiency
         $normalizedPath = Get-HashSmithNormalizedPath -Path $Path
         
+        # Cross-platform enumeration options
+        $isWindows = $PSVersionTable.PSVersion.Major -ge 6 ? $IsWindows : ($env:OS -eq "Windows_NT")
         $enumOptions = [System.IO.EnumerationOptions]::new()
         $enumOptions.RecurseSubdirectories = $true
-        $enumOptions.IgnoreInaccessible = $false
         $enumOptions.ReturnSpecialDirectories = $false
+        
+        # On non-Windows systems, be more permissive with access errors to handle permission-restricted directories
+        $enumOptions.IgnoreInaccessible = -not $isWindows -or $StrictMode -eq $false
+        
         $enumOptions.AttributesToSkip = if ($IncludeHidden) { 
             [System.IO.FileAttributes]::None 
         } else { 
@@ -156,11 +161,15 @@ function Get-HashSmithAllFiles {
                 $ExcludePatterns = $using:ExcludePatterns
                 
                 try {
-                    # Create enumeration options for this directory
+                    # Create enumeration options for this directory (cross-platform)
+                    $isWindowsLocal = $PSVersionTable.PSVersion.Major -ge 6 ? $IsWindows : ($env:OS -eq "Windows_NT")
                     $localEnumOptions = [System.IO.EnumerationOptions]::new()
                     $localEnumOptions.RecurseSubdirectories = $false  # Only process current directory
-                    $localEnumOptions.IgnoreInaccessible = $false
                     $localEnumOptions.ReturnSpecialDirectories = $false
+                    
+                    # On non-Windows systems, be more permissive with access errors
+                    $localEnumOptions.IgnoreInaccessible = -not $isWindowsLocal
+                    
                     $localEnumOptions.AttributesToSkip = if ($IncludeHidden) { 
                         [System.IO.FileAttributes]::None 
                     } else { 
