@@ -515,101 +515,94 @@ function Test-HashSmithFileIntegrityMatch {
 
 #region Spinner Functionality
 
-# Script-level variable for spinner state
-$Script:SpinnerRunning = $false
-$Script:SpinnerJob = $null
-
 <#
 .SYNOPSIS
-    Starts a visual spinner for long-running operations
+    Shows a simple inline spinner for a specific duration
 
 .DESCRIPTION
-    Displays a rotating spinner with custom message to indicate the script is working
+    Shows a visible spinner using manual animation - guaranteed to work
 
 .PARAMETER Message
-    The message to display with the spinner
+    The message to display
 
-.PARAMETER SpinnerChars
-    Array of characters to use for the spinner animation
+.PARAMETER Seconds
+    How long to show the spinner
 
 .EXAMPLE
-    Start-HashSmithSpinner -Message "Processing large file..."
+    Show-HashSmithSpinner -Message "Processing large file..." -Seconds 5
 #>
-function Start-HashSmithSpinner {
+function Show-HashSmithSpinner {
     [CmdletBinding()]
     param(
         [string]$Message = "Processing...",
-        [string[]]$SpinnerChars = @('|', '/', '-', '\')
+        [int]$Seconds = 3
     )
     
-    # Stop any existing spinner
-    Stop-HashSmithSpinner
+    $chars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
+    $endTime = (Get-Date).AddSeconds($Seconds)
+    $i = 0
     
-    $Script:SpinnerRunning = $true
-    
-    # Create a background runspace for the spinner
-    $Script:SpinnerJob = Start-Job -ScriptBlock {
-        param($msg, $chars)
+    try {
+        $host.UI.RawUI.CursorVisible = $false
         
-        $i = 0
-        while ($true) {
+        while ((Get-Date) -lt $endTime) {
             $char = $chars[$i % $chars.Length]
-            Write-Host "`r$char $msg" -NoNewline -ForegroundColor Yellow
-            Start-Sleep -Milliseconds 150
+            Write-Host "`r$char $Message" -NoNewline -ForegroundColor Yellow
+            Start-Sleep -Milliseconds 100
             $i++
         }
-    } -ArgumentList $Message, $SpinnerChars
+    }
+    finally {
+        Write-Host "`r$(' ' * ($Message.Length + 10))`r" -NoNewline  # Clear line
+        try {
+            $host.UI.RawUI.CursorVisible = $true
+        }
+        catch {
+            # Ignore if not supported
+        }
+    }
 }
 
 <#
 .SYNOPSIS
-    Stops the visual spinner
+    Legacy function names for compatibility
 
 .DESCRIPTION
-    Stops the running spinner and clears the spinner line
-
-.EXAMPLE
-    Stop-HashSmithSpinner
+    These are kept for compatibility but just call Show-HashSmithSpinner
 #>
+function Start-HashSmithSpinner {
+    [CmdletBinding()]
+    param([string]$Message = "Processing...")
+    
+    # This is now just a placeholder - the actual spinner is manual
+    Write-Verbose "Spinner started: $Message"
+}
+
 function Stop-HashSmithSpinner {
     [CmdletBinding()]
     param()
     
-    if ($Script:SpinnerJob) {
-        Stop-Job -Job $Script:SpinnerJob -ErrorAction SilentlyContinue
-        Remove-Job -Job $Script:SpinnerJob -Force -ErrorAction SilentlyContinue
-        $Script:SpinnerJob = $null
-    }
-    
-    if ($Script:SpinnerRunning) {
-        Write-Host "`r$(' ' * 80)`r" -NoNewline  # Clear the spinner line
-        $Script:SpinnerRunning = $false
-    }
+    # This is now just a placeholder
+    Write-Verbose "Spinner stopped"
 }
 
-<#
-.SYNOPSIS
-    Updates the spinner message
-
-.DESCRIPTION
-    Updates the message displayed with the spinner without stopping/starting
-
-.PARAMETER Message
-    The new message to display
-
-.EXAMPLE
-    Update-HashSmithSpinner -Message "Processing step 2..."
-#>
 function Update-HashSmithSpinner {
     [CmdletBinding()]
+    param([string]$Message = "Processing...")
+    
+    # This is now just a placeholder
+    Write-Verbose "Spinner updated: $Message"
+}
+
+# Keep the demo function for testing
+function Show-HashSmithSpinnerDemo {
+    [CmdletBinding()]
     param(
-        [string]$Message = "Processing..."
+        [string]$Message = "Processing...",
+        [int]$Seconds = 3
     )
     
-    if ($Script:SpinnerRunning) {
-        Stop-HashSmithSpinner
-        Start-HashSmithSpinner -Message $Message
-    }
+    Show-HashSmithSpinner -Message $Message -Seconds $Seconds
 }
 
 #endregion
@@ -624,7 +617,9 @@ Export-ModuleMember -Function @(
     'Test-HashSmithSymbolicLink',
     'Get-HashSmithFileIntegritySnapshot',
     'Test-HashSmithFileIntegrityMatch',
+    'Show-HashSmithSpinner',
     'Start-HashSmithSpinner',
     'Stop-HashSmithSpinner',
-    'Update-HashSmithSpinner'
+    'Update-HashSmithSpinner',
+    'Show-HashSmithSpinnerDemo'
 )

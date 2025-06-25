@@ -148,11 +148,14 @@ function Get-HashSmithFileHashSafe {
             $showSpinner = $currentFileInfo.Length -gt (50MB)  # Show spinner for files larger than 50MB
             
             try {
-                # Start spinner for large files
+                # Show spinner for large files using simple approach
                 if ($showSpinner) {
                     $fileName = [System.IO.Path]::GetFileName($Path)
                     $sizeText = "$('{0:N1} MB' -f ($currentFileInfo.Length / 1MB))"
-                    Start-HashSmithSpinner -Message "Processing large file: $fileName ($sizeText)"
+                    
+                    # Estimate processing time and show spinner
+                    $estimatedSeconds = [Math]::Max(2, [Math]::Min(10, ($currentFileInfo.Length / 100MB) * 3))
+                    Show-HashSmithSpinner -Message "Processing large file: $fileName ($sizeText)" -Seconds $estimatedSeconds
                 }
                 
                 # Use FileShare.Read and FileOptions.SequentialScan for better performance and locked file access
@@ -201,11 +204,7 @@ function Get-HashSmithFileHashSafe {
                     $hashBytes = $hashAlgorithm.Hash
                 }
                 
-                # Stop spinner
-                if ($showSpinner) {
-                    Stop-HashSmithSpinner
-                }
-                
+                # Hash computation completed - no spinner cleanup needed since it's already done
                 $result.Hash = [System.BitConverter]::ToString($hashBytes) -replace '-', ''
                 $result.Hash = $result.Hash.ToLower()
                 
@@ -223,9 +222,7 @@ function Get-HashSmithFileHashSafe {
                 break
                 
             } finally {
-                if ($showSpinner) {
-                    Stop-HashSmithSpinner
-                }
+                # Spinner is self-cleaning, no cleanup needed
                 if ($fileStream) { $fileStream.Dispose() }
                 if ($hashAlgorithm) { $hashAlgorithm.Dispose() }
             }
