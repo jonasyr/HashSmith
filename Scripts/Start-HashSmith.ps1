@@ -483,7 +483,7 @@ try {
         Write-StatItem -Icon "🔹" -Label "Medium Files (1MB-100MB)" -Value $mediumFiles -Color "Cyan"
     }
     if ($largeFiles -gt 0) {
-        Write-StatItem -Icon "🔶" -Label "Large Files (>100MB)" -Value $largeFiles -Color "Orange"
+        Write-StatItem -Icon "🔶" -Label "Large Files (>100MB)" -Value $largeFiles -Color "DarkYellow"
     }
     
     # More realistic time estimate with caveats
@@ -534,7 +534,7 @@ try {
             Write-StatItem -Icon "🔹" -Label "Medium Files (1MB-100MB)" -Value $mediumFiles -Color "Cyan"
         }
         if ($largeFiles -gt 0) {
-            Write-StatItem -Icon "🔶" -Label "Large Files (>100MB)" -Value $largeFiles -Color "Orange"
+            Write-StatItem -Icon "🔶" -Label "Large Files (>100MB)" -Value $largeFiles -Color "DarkYellow"
         }
         
         if ($estimatedTime -lt 1) {
