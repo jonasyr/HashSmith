@@ -110,9 +110,11 @@ param(
     
     [Parameter()]
     [ValidateScript({
-        $parent = Split-Path $_ -Parent
-        if ($parent -and -not (Test-Path $parent)) {
-            throw "Log file parent directory does not exist: $parent"
+        if ($_ -and (Split-Path $_ -Parent)) {
+            $parent = Split-Path $_ -Parent
+            if (-not (Test-Path $parent)) {
+                throw "Log file parent directory does not exist: $parent"
+            }
         }
         $true
     })]
@@ -166,7 +168,10 @@ param(
     [switch]$TestMode,
     
     [Parameter()]
-    [switch]$StrictMode
+    [switch]$StrictMode,
+    
+    [Parameter()]
+    [switch]$UseParallel
 )
 
 #region Module Import and Initialization
@@ -279,13 +284,35 @@ try {
     Write-Host ""
     
     # Test write permissions
-    try {
-        $testFile = Join-Path (Split-Path $LogFile) "test_write_$([Guid]::NewGuid()).tmp"
-        "test" | Set-Content -Path $testFile
-        Remove-Item $testFile -Force
-    }
-    catch {
-        throw "Cannot write to log directory: $($_.Exception.Message)"
+    if (-not $WhatIf) {
+        try {
+            $testFile = Join-Path (Split-Path $LogFile) "test_write_$([Guid]::NewGuid()).tmp"
+            "test" | Set-Content -Path $testFile -ErrorAction Stop
+            if (Test-Path $testFile) {
+                Remove-Item $testFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+        catch [System.UnauthorizedAccessException] {
+            $alternateLogPath = Join-Path $env:TEMP "$(Split-Path $LogFile -Leaf)"
+            Write-Warning "Cannot write to original log location due to permissions. Using alternate location: $alternateLogPath"
+            $LogFile = $alternateLogPath
+        }
+        catch {
+            $alternateLogPath = Join-Path $env:TEMP "$(Split-Path $LogFile -Leaf)"
+            Write-Warning "Cannot write to log directory: $($_.Exception.Message). Using alternate location: $alternateLogPath"
+            $LogFile = $alternateLogPath
+        }
+    } else {
+        # Test path for WhatIf mode without creating files
+        try {
+            $testPath = Split-Path $LogFile
+            if (-not (Test-Path $testPath)) {
+                throw "Log directory does not exist: $testPath"
+            }
+        }
+        catch {
+            throw "Cannot access log directory: $($_.Exception.Message)"
+        }
     }
     
     # Load existing entries if resuming or fixing errors
@@ -389,6 +416,13 @@ try {
         Write-Host "   • File integrity verification (enabled: $VerifyIntegrity)" -ForegroundColor Cyan
         Write-Host "   • Circuit breaker pattern for resilience" -ForegroundColor Cyan
         Write-Host "   • Network path monitoring and recovery" -ForegroundColor Cyan
+        if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
+            Write-Host "   • Parallel processing enabled (PowerShell 7+)" -ForegroundColor Green
+        } elseif ($UseParallel) {
+            Write-Host "   • Parallel processing requested but not available (PowerShell 5.1)" -ForegroundColor Yellow
+        } else {
+            Write-Host "   • Sequential processing (parallel disabled)" -ForegroundColor Gray
+        }
         
         Write-Host ""
         exit 0
@@ -411,8 +445,13 @@ try {
     # Process files with enhanced features
     Write-HashSmithLog -Message "Starting enhanced file processing..." -Level INFO
     
+    # Determine if parallel processing should be used (temporarily disabled for stability)
     # Determine if parallel processing should be used
-    $useParallel = $PSVersionTable.PSVersion.Major -ge 7 -and $MaxThreads -gt 1
+    $useParallel = $false  # Temporarily disable parallel processing to avoid stack overflow
+    
+    if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
+        Write-Warning "Parallel processing temporarily disabled due to PowerShell stack overflow issue. Using sequential processing."
+    }
     
     $fileHashes = Start-HashSmithFileProcessing -Files $filesToProcess -LogPath $LogFile -Algorithm $HashAlgorithm -ExistingEntries $existingEntries -BasePath $SourceDir -StrictMode:$StrictMode -VerifyIntegrity:$VerifyIntegrity -MaxThreads $MaxThreads -ChunkSize $ChunkSize -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -ShowProgress:$ShowProgress -UseParallel:$useParallel
     

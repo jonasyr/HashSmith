@@ -105,6 +105,15 @@ function Start-HashSmithFileProcessing {
     Write-HashSmithLog -Message "Starting enhanced file processing with $($Files.Count) files" -Level INFO -Component 'PROCESS'
     Write-HashSmithLog -Message "Algorithm: $Algorithm, Strict Mode: $StrictMode, Verify Integrity: $VerifyIntegrity" -Level INFO -Component 'PROCESS'
     
+    # Log parallel processing status
+    if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
+        Write-HashSmithLog -Message "Parallel processing enabled with $MaxThreads threads (PowerShell 7+)" -Level INFO -Component 'PROCESS'
+    } elseif ($UseParallel) {
+        Write-HashSmithLog -Message "Parallel processing requested but using sequential processing (PowerShell 5.1)" -Level WARNING -Component 'PROCESS'
+    } else {
+        Write-HashSmithLog -Message "Sequential processing (parallel disabled)" -Level INFO -Component 'PROCESS'
+    }
+    
     $processedCount = 0
     $errorCount = 0
     $totalBytes = 0
@@ -133,84 +142,13 @@ function Start-HashSmithFileProcessing {
         
         # Guard parallel processing behind PowerShell version check
         if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-            # Process chunk with parallel processing (PowerShell 7+)
+            # Process chunk with parallel processing (PowerShell 7+) - simplified to avoid stack overflow
             $chunkResults = $chunk | ForEach-Object -Parallel {
-                # Import required variables and functions into parallel runspace
+                # Import required variables into parallel runspace
                 $Algorithm = $using:Algorithm
                 $RetryCount = $using:RetryCount
-                $TimeoutSeconds = $using:TimeoutSeconds
-                $VerifyIntegrity = $using:VerifyIntegrity
-                $StrictMode = $using:StrictMode
-                $BufferSize = $using:bufferSize
                 
-                # Re-create essential functions for parallel execution
-                function Get-NormalizedPath {
-                    param([string]$Path)
-                    try {
-                        $normalizedPath = [System.IO.Path]::GetFullPath($Path.Normalize([System.Text.NormalizationForm]::FormC))
-                        if ($normalizedPath.Length -gt 260 -and -not $normalizedPath.StartsWith('\\?\')) {
-                            if ($normalizedPath -match '^[\\\\]{2}[^\\]+\\') {
-                                return "\\?\UNC\" + $normalizedPath.Substring(2)
-                            } else {
-                                return "\\?\$normalizedPath"
-                            }
-                        }
-                        return $normalizedPath
-                    }
-                    catch { throw }
-                }
-                
-                function Test-FileAccessible {
-                    param([string]$Path, [int]$TimeoutMs = 5000)
-                    $timeout = (Get-Date).AddMilliseconds($TimeoutMs)
-                    do {
-                        try {
-                            $normalizedPath = Get-NormalizedPath -Path $Path
-                            $fileStream = [System.IO.File]::Open($normalizedPath, 'Open', 'Read', 'Read')
-                            $fileStream.Close()
-                            return $true
-                        }
-                        catch [System.IO.IOException] {
-                            if ((Get-Date) -gt $timeout) { return $false }
-                            Start-Sleep -Milliseconds 200
-                        }
-                        catch { return $false }
-                    } while ($true)
-                }
-                
-                function Get-FileIntegritySnapshot {
-                    param([string]$Path)
-                    try {
-                        $fileInfo = [System.IO.FileInfo]::new($Path)
-                        return @{
-                            Size = $fileInfo.Length
-                            LastWriteTime = $fileInfo.LastWriteTime
-                            LastWriteTimeUtc = $fileInfo.LastWriteTimeUtc
-                            CreationTime = $fileInfo.CreationTime
-                            Attributes = $fileInfo.Attributes
-                        }
-                    }
-                    catch { return $null }
-                }
-                
-                function Test-FileIntegrityMatch {
-                    param([hashtable]$Snapshot1, [hashtable]$Snapshot2)
-                    if (-not $Snapshot1 -or -not $Snapshot2) { return $false }
-                    return ($Snapshot1.Size -eq $Snapshot2.Size -and
-                            $Snapshot1.LastWriteTimeUtc -eq $Snapshot2.LastWriteTimeUtc -and
-                            $Snapshot1.Attributes -eq $Snapshot2.Attributes)
-                }
-                
-                function Test-SymbolicLink {
-                    param([string]$Path)
-                    try {
-                        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
-                        return ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint
-                    }
-                    catch { return $false }
-                }
-                
-                # Process single file
+                # Process single file with minimal complexity
                 $file = $_
                 $result = @{
                     Path = $file.FullName
@@ -224,144 +162,28 @@ function Start-HashSmithFileProcessing {
                     IsSymlink = $false
                     RaceConditionDetected = $false
                     IntegrityVerified = $false
-                    Attempts = 0
+                    Attempts = 1
                 }
                 
                 $startTime = Get-Date
                 
-                # Check if file is a symbolic link
-                $result.IsSymlink = Test-SymbolicLink -Path $file.FullName
-                
-                # Get initial integrity snapshot
-                $preSnapshot = $null
-                if ($StrictMode -or $VerifyIntegrity) {
-                    # Use stored snapshot if available (from discovery)
-                    if ($file.PSObject.Properties['IntegritySnapshot']) {
-                        $preSnapshot = $file.IntegritySnapshot
-                    } else {
-                        $preSnapshot = Get-FileIntegritySnapshot -Path $file.FullName
+                try {
+                    # Simple hash computation without complex retry logic
+                    $hashAlgorithm = [System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)
+                    try {
+                        $fileBytes = [System.IO.File]::ReadAllBytes($file.FullName)
+                        $hashBytes = $hashAlgorithm.ComputeHash($fileBytes)
+                        $result.Hash = [System.BitConverter]::ToString($hashBytes) -replace '-', ''
+                        $result.Hash = $result.Hash.ToLower()
+                        $result.Success = $true
+                    }
+                    finally {
+                        if ($hashAlgorithm) { $hashAlgorithm.Dispose() }
                     }
                 }
-                
-                # Process file with retry logic
-                for ($attempt = 1; $attempt -le $RetryCount; $attempt++) {
-                    $result.Attempts = $attempt
-                    
-                    try {
-                        $normalizedPath = Get-NormalizedPath -Path $file.FullName
-                        
-                        if (-not (Test-Path -LiteralPath $normalizedPath)) {
-                            throw [System.IO.FileNotFoundException]::new("File not found: $($file.FullName)")
-                        }
-                        
-                        if (-not (Test-FileAccessible -Path $normalizedPath -TimeoutMs ($TimeoutSeconds * 1000))) {
-                            throw [System.IO.IOException]::new("File is locked or inaccessible: $($file.FullName)")
-                        }
-                        
-                        # Race condition detection
-                        if ($preSnapshot) {
-                            $currentSnapshot = Get-FileIntegritySnapshot -Path $normalizedPath
-                            if (-not (Test-FileIntegrityMatch -Snapshot1 $preSnapshot -Snapshot2 $currentSnapshot)) {
-                                $result.RaceConditionDetected = $true
-                                if ($StrictMode) {
-                                    throw [System.InvalidOperationException]::new("File modified between discovery and processing")
-                                }
-                                # Update snapshot for post-processing check
-                                $preSnapshot = $currentSnapshot
-                            }
-                        }
-                        
-                        # Compute hash
-                        $hashAlgorithm = [System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)
-                        $fileStream = $null
-                        
-                        try {
-                            $fileStream = [System.IO.File]::Open($normalizedPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, 4096, [System.IO.FileOptions]::SequentialScan)
-                            $currentFileInfo = [System.IO.FileInfo]::new($normalizedPath)
-                            
-                            # Handle zero-byte files explicitly
-                            if ($currentFileInfo.Length -eq 0) {
-                                $hashBytes = $hashAlgorithm.ComputeHash([byte[]]::new(0))
-                            } else {
-                                # Stream-based hash computation
-                                $buffer = [byte[]]::new($BufferSize)
-                                $totalRead = 0
-                                
-                                while ($totalRead -lt $currentFileInfo.Length) {
-                                    $bytesRead = $fileStream.Read($buffer, 0, $buffer.Length)
-                                    if ($bytesRead -eq 0) { break }
-                                    
-                                    if ($totalRead + $bytesRead -eq $currentFileInfo.Length) {
-                                        $hashAlgorithm.TransformFinalBlock($buffer, 0, $bytesRead) | Out-Null
-                                    } else {
-                                        $hashAlgorithm.TransformBlock($buffer, 0, $bytesRead, $null, 0) | Out-Null
-                                    }
-                                    
-                                    $totalRead += $bytesRead
-                                    
-                                    if ($totalRead -gt $currentFileInfo.Length) {
-                                        throw [System.InvalidDataException]::new("Read more bytes than expected")
-                                    }
-                                }
-                                
-                                $hashBytes = $hashAlgorithm.Hash
-                            }
-                            
-                            $result.Hash = [System.BitConverter]::ToString($hashBytes) -replace '-', ''
-                            $result.Hash = $result.Hash.ToLower()
-                            
-                            # Post-processing integrity check
-                            if ($StrictMode -or $VerifyIntegrity) {
-                                $postSnapshot = Get-FileIntegritySnapshot -Path $normalizedPath
-                                if ($preSnapshot -and (Test-FileIntegrityMatch -Snapshot1 $preSnapshot -Snapshot2 $postSnapshot)) {
-                                    $result.IntegrityVerified = $true
-                                } elseif ($StrictMode) {
-                                    throw [System.InvalidOperationException]::new("File integrity verification failed")
-                                }
-                            }
-                            
-                            $result.Success = $true
-                            break
-                            
-                        } finally {
-                            if ($fileStream) { $fileStream.Dispose() }
-                            if ($hashAlgorithm) { $hashAlgorithm.Dispose() }
-                        }
-                    }
-                    catch [System.IO.FileNotFoundException] {
-                        $result.Error = $_.Exception.Message
-                        $result.ErrorCategory = 'FileNotFound'
-                        break
-                    }
-                    catch [System.IO.DirectoryNotFoundException] {
-                        $result.Error = $_.Exception.Message
-                        $result.ErrorCategory = 'DirectoryNotFound'
-                        break
-                    }
-                    catch [System.InvalidOperationException] {
-                        $result.Error = $_.Exception.Message
-                        $result.ErrorCategory = 'Integrity'
-                        break
-                    }
-                    catch [System.UnauthorizedAccessException] {
-                        $result.Error = $_.Exception.Message
-                        $result.ErrorCategory = 'AccessDenied'
-                        break
-                    }
-                    catch [System.IO.IOException] {
-                        $result.Error = $_.Exception.Message
-                        $result.ErrorCategory = 'IO'
-                    }
-                    catch {
-                        $result.Error = $_.Exception.Message
-                        $result.ErrorCategory = 'Unknown'
-                    }
-                    
-                    # Retry logic for retriable errors
-                    if ($attempt -lt $RetryCount -and $result.ErrorCategory -in @('IO', 'Unknown')) {
-                        $delay = [Math]::Min(500 * [Math]::Pow(2, $attempt - 1), 5000)
-                        Start-Sleep -Milliseconds $delay
-                    }
+                catch {
+                    $result.Error = $_.Exception.Message
+                    $result.ErrorCategory = 'ProcessingError'
                 }
                 
                 $result.Duration = (Get-Date) - $startTime
@@ -394,8 +216,13 @@ function Start-HashSmithFileProcessing {
             $processedCount++
             
             if ($result.Success) {
-                # Write to log
-                Write-HashSmithHashEntry -LogPath $LogPath -FilePath $result.Path -Hash $result.Hash -Size $result.Size -Modified $result.Modified -BasePath $BasePath -IsSymlink $result.IsSymlink -RaceConditionDetected $result.RaceConditionDetected -IntegrityVerified $result.IntegrityVerified -UseBatching
+                # Write to log with error handling
+                try {
+                    Write-HashSmithHashEntry -LogPath $LogPath -FilePath $result.Path -Hash $result.Hash -Size $result.Size -Modified $result.Modified -BasePath $BasePath -IsSymlink $result.IsSymlink -RaceConditionDetected $result.RaceConditionDetected -IntegrityVerified $result.IntegrityVerified -UseBatching
+                }
+                catch {
+                    Write-HashSmithLog -Message "Failed to write log entry for $($result.Path): $($_.Exception.Message)" -Level WARN -Component 'PROCESS'
+                }
                 
                 # Store for directory hash
                 $fileHashes[$result.Path] = @{
@@ -414,8 +241,13 @@ function Start-HashSmithFileProcessing {
                     $stats.FilesRaceCondition++
                 }
             } else {
-                # Write error to log
-                Write-HashSmithHashEntry -LogPath $LogPath -FilePath $result.Path -Size $result.Size -Modified $result.Modified -ErrorMessage $result.Error -ErrorCategory $result.ErrorCategory -BasePath $BasePath -IsSymlink $result.IsSymlink -RaceConditionDetected $result.RaceConditionDetected -UseBatching
+                # Write error to log with error handling
+                try {
+                    Write-HashSmithHashEntry -LogPath $LogPath -FilePath $result.Path -Size $result.Size -Modified $result.Modified -ErrorMessage $result.Error -ErrorCategory $result.ErrorCategory -BasePath $BasePath -IsSymlink $result.IsSymlink -RaceConditionDetected $result.RaceConditionDetected -UseBatching
+                }
+                catch {
+                    Write-HashSmithLog -Message "Failed to write error log entry for $($result.Path): $($_.Exception.Message)" -Level WARN -Component 'PROCESS'
+                }
                 
                 $errorCount++
                 $stats.FilesError++

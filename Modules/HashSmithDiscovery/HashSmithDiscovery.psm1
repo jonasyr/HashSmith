@@ -69,6 +69,7 @@ function Get-HashSmithAllFiles {
     $allFiles = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
     $errors = [System.Collections.Generic.List[hashtable]]::new()
     $symlinkCount = 0
+    $timeoutMinutes = 30  # Add discovery timeout
     
     # Test network connectivity first
     if (-not (Test-HashSmithNetworkPath -Path $Path -UseCache)) {
@@ -95,9 +96,22 @@ function Get-HashSmithAllFiles {
         $fileEnumerator = [System.IO.Directory]::EnumerateFiles($normalizedPath, '*', $enumOptions)
         $processedCount = 0
         $skippedCount = 0
+        $lastProgressUpdate = Get-Date
         
         foreach ($filePath in $fileEnumerator) {
             try {
+                # Progress reporting every 2 seconds
+                if (((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 2) {
+                    Write-HashSmithLog -Message "Discovery progress: $processedCount files found, $skippedCount skipped" -Level PROGRESS -Component 'DISCOVERY'
+                    $lastProgressUpdate = Get-Date
+                }
+                
+                # Check for discovery timeout
+                if (((Get-Date) - $discoveryStart).TotalMinutes -gt $timeoutMinutes) {
+                    Write-HashSmithLog -Message "Discovery timeout reached ($timeoutMinutes minutes), stopping enumeration" -Level WARN -Component 'DISCOVERY'
+                    break
+                }
+                
                 # Check circuit breaker periodically
                 if ($processedCount % 1000 -eq 0 -and -not (Test-HashSmithCircuitBreaker -Component 'DISCOVERY')) {
                     Write-HashSmithLog -Message "Discovery halted due to circuit breaker" -Level ERROR -Component 'DISCOVERY'
