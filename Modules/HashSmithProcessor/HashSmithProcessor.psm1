@@ -105,9 +105,15 @@ function Start-HashSmithFileProcessing {
     Write-HashSmithLog -Message "Starting enhanced file processing with $($Files.Count) files" -Level INFO -Component 'PROCESS'
     Write-HashSmithLog -Message "Algorithm: $Algorithm, Strict Mode: $StrictMode, Verify Integrity: $VerifyIntegrity" -Level INFO -Component 'PROCESS'
     
-    # Log parallel processing status
+    # Log parallel processing status (only once)
+    $safeThreads = if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
+        [Math]::Min($MaxThreads, [Math]::Max(2, [Environment]::ProcessorCount / 2))
+    } else {
+        1
+    }
+    
     if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-        Write-HashSmithLog -Message "Parallel processing enabled with $MaxThreads threads (PowerShell 7+)" -Level INFO -Component 'PROCESS'
+        Write-HashSmithLog -Message "Parallel processing enabled: $safeThreads threads (reduced from $MaxThreads for stability)" -Level INFO -Component 'PROCESS'
     } elseif ($UseParallel) {
         Write-HashSmithLog -Message "Parallel processing requested but using sequential processing (PowerShell 5.1)" -Level WARNING -Component 'PROCESS'
     } else {
@@ -123,7 +129,6 @@ function Start-HashSmithFileProcessing {
     
     # Get configuration values for parallel processing
     $config = Get-HashSmithConfig
-    $bufferSize = $config.BufferSize
     
     # Process files in chunks for memory efficiency
     for ($i = 0; $i -lt $Files.Count; $i += $ChunkSize) {
@@ -145,15 +150,10 @@ function Start-HashSmithFileProcessing {
         
         # Guard parallel processing behind PowerShell version check
         if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-            # Reduce max threads to prevent system overload and freezes  
-            $safeThreads = [Math]::Min($MaxThreads, [Math]::Max(2, [Environment]::ProcessorCount / 2))  # Even more conservative
-            
-            Write-HashSmithLog -Message "Using $safeThreads threads (reduced from $MaxThreads for system stability)" -Level INFO -Component 'PROCESS'
-            
             # Initialize progress tracking variables
-            $chunkStartTime = Get-Date
-            $completedFiles = 0
             $totalChunkFiles = $chunk.Count
+            $lastProgressCount = 0
+            $lastProgressTime = Get-Date
             
             # Process files with parallel jobs and show live progress
             $chunkResults = $chunk | ForEach-Object -Parallel {
@@ -211,9 +211,8 @@ function Start-HashSmithFileProcessing {
             # Show real-time progress while jobs are running
             $spinChars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
             $spinIndex = 0
-            $lastProgressTime = Get-Date
             
-            # Monitor the parallel jobs and show progress
+            # Monitor the parallel jobs and show progress with smart timeout
             while ($chunkResults.State -eq 'Running') {
                 $char = $spinChars[$spinIndex % $spinChars.Length]
                 $elapsed = (Get-Date) - $chunkStartTime
@@ -236,18 +235,24 @@ function Start-HashSmithFileProcessing {
                     [Math]::Round(($completedCount / $totalChunkFiles) * 100, 1) 
                 } else { 0 }
                 
-                $progressMsg = "$char Processing chunk $chunkNumber of $totalChunks | Files: $completedCount/$totalChunkFiles ($progressPercent%) | $elapsedStr elapsed"
-                Write-Host "`r$progressMsg" -NoNewline -ForegroundColor Yellow
-                
-                Start-Sleep -Milliseconds 200
-                $spinIndex++
-                
-                # Prevent infinite loop - timeout after 10 minutes per chunk
-                if ($elapsed.TotalMinutes -gt 10) {
-                    Write-Host "`r⚠️ Chunk processing timeout, stopping..." -ForegroundColor Red
+                # Smart timeout logic - check for progress, not just time
+                $timeSinceLastProgress = (Get-Date) - $lastProgressTime
+                if ($completedCount -gt $lastProgressCount) {
+                    $lastProgressCount = $completedCount
+                    $lastProgressTime = Get-Date
+                } elseif ($timeSinceLastProgress.TotalMinutes -gt 20) {
+                    # Only timeout if no progress for 20 minutes
+                    Write-Host "`r⚠️  No progress for 20 minutes, stopping chunk..." -ForegroundColor Red
                     Stop-Job $chunkResults -ErrorAction SilentlyContinue
                     break
                 }
+                
+                # Create a more compact progress message
+                $progressMsg = "$char Chunk $chunkNumber/$totalChunks | $completedCount/$totalChunkFiles ($progressPercent%) | $elapsedStr"
+                Write-Host "`r$progressMsg$(' ' * 10)" -NoNewline -ForegroundColor Yellow
+                
+                Start-Sleep -Milliseconds 200
+                $spinIndex++
             }
             
             # Get the final results
@@ -261,7 +266,7 @@ function Start-HashSmithFileProcessing {
             }
             
             # Clear the progress line
-            Write-Host "`r$(' ' * 100)`r" -NoNewline
+            Write-Host "`r$(' ' * 80)`r" -NoNewline
         } else {
             # Process chunk sequentially (PowerShell 5.1 or parallel disabled)
             $chunkResults = @()
@@ -372,8 +377,25 @@ function Start-HashSmithFileProcessing {
             $chunkElapsed = (Get-Date) - $chunkStartTime
             $filesPerSecond = if ($chunkElapsed.TotalSeconds -gt 0) { $chunk.Count / $chunkElapsed.TotalSeconds } else { 0 }
             
-            Write-HashSmithLog -Message "✅ Chunk $chunkNumber completed in $($chunkElapsed.TotalSeconds.ToString('F1'))s ($($filesPerSecond.ToString('F1')) files/sec)" -Level INFO -Component 'PROCESS'
-            Write-Host "✅ Chunk $chunkNumber/$totalChunks completed | Rate: $($filesPerSecond.ToString('F1')) files/sec | Pausing to reduce system load..." -ForegroundColor Green
+            # Only show detailed log for first and every 10th chunk to reduce clutter
+            if ($chunkNumber -eq 1 -or $chunkNumber % 10 -eq 0) {
+                Write-HashSmithLog -Message "✅ Chunk $chunkNumber completed in $($chunkElapsed.TotalSeconds.ToString('F1'))s ($($filesPerSecond.ToString('F1')) files/sec)" -Level INFO -Component 'PROCESS'
+                
+                # Show overall progress summary every 10 chunks
+                if ($chunkNumber % 10 -eq 0) {
+                    $overallPercent = [Math]::Round(($chunkNumber / $totalChunks) * 100, 1)
+                    $overallElapsed = (Get-Date) - $stats.StartTime
+                    $eta = if ($overallPercent -gt 0) {
+                        $totalEstimated = ($overallElapsed.TotalMinutes / $overallPercent) * 100
+                        $remaining = $totalEstimated - $overallElapsed.TotalMinutes
+                        if ($remaining -gt 60) { "$([Math]::Floor($remaining / 60))h $([Math]::Floor($remaining % 60))m" } else { "$([Math]::Floor($remaining))m" }
+                    } else { "calculating..." }
+                    Write-HashSmithLog -Message "📊 Overall Progress: $overallPercent% ($chunkNumber/$totalChunks chunks) | ETA: $eta" -Level INFO -Component 'PROCESS'
+                }
+            }
+            
+            # Always show the brief progress update  
+            Write-Host "✅ Chunk $chunkNumber/$totalChunks completed | Rate: $($filesPerSecond.ToString('F1')) files/sec" -ForegroundColor Green
             Start-Sleep -Milliseconds 750  # Increased pause to prevent system freezes
         }
         
