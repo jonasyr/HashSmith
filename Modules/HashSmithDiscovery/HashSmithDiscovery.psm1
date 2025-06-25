@@ -65,6 +65,9 @@ function Get-HashSmithAllFiles {
     Write-HashSmithLog -Message "Target path: $Path" -Level INFO -Component 'DISCOVERY'
     Write-HashSmithLog -Message "Include hidden: $IncludeHidden | Include symlinks: $IncludeSymlinks | Strict mode: $StrictMode" -Level INFO -Component 'DISCOVERY'
     
+    # Show immediate activity feedback
+    Write-Host "🔄 Initializing file system access..." -ForegroundColor Yellow -NoNewline
+    
     $discoveryStart = Get-Date
     $allFiles = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
     $errors = [System.Collections.Generic.List[hashtable]]::new()
@@ -72,9 +75,15 @@ function Get-HashSmithAllFiles {
     $timeoutMinutes = 30  # Discovery timeout
     
     # Test network connectivity first
+    Write-Host "`r🌐 Testing network connectivity..." -NoNewline -ForegroundColor Yellow
     if (-not (Test-HashSmithNetworkPath -Path $Path -UseCache)) {
+        Write-Host "`r$(' ' * 40)`r" -NoNewline  # Clear progress line
         throw "Network path is not accessible: $Path"
     }
+    
+    Write-Host "`r✅ Network path accessible, starting discovery..." -NoNewline -ForegroundColor Green
+    Start-Sleep -Milliseconds 500  # Brief pause to show the success message
+    Write-Host "`r$(' ' * 50)`r" -NoNewline  # Clear the line
     
     try {
         # Use .NET Directory.EnumerateFiles for memory efficiency
@@ -96,11 +105,34 @@ function Get-HashSmithAllFiles {
         if ($PSVersionTable.PSVersion.Major -ge 7 -and -not $StrictMode) {
             Write-HashSmithLog -Message "Using enhanced parallel file discovery (PowerShell 7+)" -Level INFO -Component 'DISCOVERY'
             
-            # Get all directories for parallel processing
+            # Get all directories for parallel processing with immediate progress feedback
+            Write-Host "📂 Enumerating directory structure..." -ForegroundColor Cyan -NoNewline
             $directories = @($normalizedPath)
+            $directoryEnumStart = Get-Date
+            $dirProgressChars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
+            $dirProgressIndex = 0
+            
             try {
-                $directories += [System.IO.Directory]::EnumerateDirectories($normalizedPath, '*', [System.IO.SearchOption]::AllDirectories)
+                $directoryEnumerator = [System.IO.Directory]::EnumerateDirectories($normalizedPath, '*', [System.IO.SearchOption]::AllDirectories)
+                $dirCount = 0
+                
+                foreach ($dir in $directoryEnumerator) {
+                    $directories += $dir
+                    $dirCount++
+                    
+                    # Show spinning progress every 25 directories or every 0.5 seconds
+                    if ($dirCount % 25 -eq 0 -or ((Get-Date) - $directoryEnumStart).TotalSeconds % 0.5 -lt 0.1) {
+                        $char = $dirProgressChars[$dirProgressIndex % $dirProgressChars.Length]
+                        Write-Host "`r📂 Enumerating directory structure... $char $dirCount dirs found" -NoNewline -ForegroundColor Cyan
+                        $dirProgressIndex++
+                    }
+                }
+                
+                # Clear the enumeration progress line
+                Write-Host "`r$(' ' * 60)`r" -NoNewline
+                
             } catch {
+                Write-Host "`r$(' ' * 60)`r" -NoNewline  # Clear progress line
                 Write-HashSmithLog -Message "Error enumerating directories: $($_.Exception.Message)" -Level WARN -Component 'DISCOVERY'
             }
             
@@ -228,7 +260,10 @@ function Get-HashSmithAllFiles {
         } else {
             # Enhanced sequential discovery for PowerShell 5.1 or strict mode
             Write-HashSmithLog -Message "Using sequential file discovery with enhanced progress" -Level INFO -Component 'DISCOVERY'
-            Write-Host "🔍 Sequential discovery mode..." -ForegroundColor Gray
+            Write-Host "🔍 Initializing sequential discovery..." -ForegroundColor Gray
+            
+            # Show immediate feedback that discovery is starting
+            Write-Host "⚡ Starting file enumeration..." -ForegroundColor Cyan -NoNewline
             
             # Enumerate files in streaming fashion to reduce memory usage
             $fileEnumerator = [System.IO.Directory]::EnumerateFiles($normalizedPath, '*', $enumOptions)
@@ -237,11 +272,18 @@ function Get-HashSmithAllFiles {
             $lastProgressUpdate = Get-Date
             $progressChars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
             $progressIndex = 0
+            $firstFileFound = $false
             
             foreach ($filePath in $fileEnumerator) {
                 try {
+                    # Show immediate feedback when first files are found
+                    if (-not $firstFileFound) {
+                        Write-Host "`r⚡ Files found, processing..." -NoNewline -ForegroundColor Green
+                        $firstFileFound = $true
+                    }
+                    
                     # Professional progress reporting with reduced frequency
-                    if (((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 2) {
+                    if (((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 1.5) {
                         $char = $progressChars[$progressIndex % $progressChars.Length]
                         $elapsed = ((Get-Date) - $discoveryStart).TotalSeconds
                         $rate = if ($elapsed -gt 0) { [Math]::Round($processedCount / $elapsed, 0) } else { 0 }
