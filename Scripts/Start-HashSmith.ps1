@@ -500,24 +500,19 @@ try {
         $directoryHashResult = Get-HashSmithDirectoryIntegrityHash -FileHashes $allFileHashes -Algorithm $HashAlgorithm -BasePath $SourceDir -StrictMode:$StrictMode
         
         if ($directoryHashResult) {
-            # Write enhanced directory hash summary to log
+            # Write final summary in exact specified format
+            $totalBytes = $directoryHashResult.TotalSize
+            $totalGB = $totalBytes / 1GB
+            $throughputMBps = ($totalBytes / 1MB) / $stopwatch.Elapsed.TotalSeconds
+            
             $summaryInfo = @(
                 "",
-                "# Enhanced Directory Integrity Summary",
-                "Directory${HashAlgorithm} = $($directoryHashResult.Hash)",
-                "TotalFiles = $($directoryHashResult.FileCount)",
-                "TotalBytes = $($directoryHashResult.TotalSize)",
-                "ProcessingTime = $($stopwatch.Elapsed.TotalSeconds.ToString('F2'))s",
-                "SymlinkCount = $((Get-HashSmithStatistics).FilesSymlinks)",
-                "RaceConditionsDetected = $((Get-HashSmithStatistics).FilesRaceCondition)",
-                "RetriableErrors = $((Get-HashSmithStatistics).RetriableErrors)",
-                "NonRetriableErrors = $((Get-HashSmithStatistics).NonRetriableErrors)",
-                "IntegrityMetadata = Algorithm:$($directoryHashResult.Algorithm)|Version:$($config.Version)|InputSize:$($directoryHashResult.Metadata.InputSize)",
-                "Timestamp = $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+                "Total$($HashAlgorithm) = $($directoryHashResult.Hash)",
+                "$($directoryHashResult.FileCount) files checked ($($totalBytes) bytes, $($totalGB.ToString('F2')) GB, $($throughputMBps.ToString('F1')) MB/s)."
             )
             
             $summaryInfo | Add-Content -Path $LogFile -Encoding UTF8
-            Write-HashSmithLog -Message "Enhanced directory integrity hash: $($directoryHashResult.Hash)" -Level SUCCESS
+            Write-HashSmithLog -Message "Directory integrity hash: $($directoryHashResult.Hash)" -Level SUCCESS
             Write-HashSmithLog -Message "Hash metadata: $($directoryHashResult.FileCount) files, $($directoryHashResult.TotalSize) bytes" -Level INFO
         }
     }

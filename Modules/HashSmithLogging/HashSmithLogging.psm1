@@ -100,7 +100,7 @@ function Initialize-HashSmithLogFile {
     
     $config = Get-HashSmithConfig
     
-    # Create log file with comprehensive header
+    # Create log file with enhanced header
     $header = @(
         "# File Integrity Log - HashSmith v$($config.Version)",
         "# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
@@ -118,7 +118,7 @@ function Initialize-HashSmithLogFile {
         "#   Strict Mode: $($Configuration.StrictMode)",
         "#   Max Threads: $($Configuration.MaxThreads)",
         "#   Chunk Size: $($Configuration.ChunkSize)",
-        "# Format: RelativePath = Hash, Size: Bytes, Modified: Timestamp, Flags: [S=Symlink,R=RaceCondition,I=IntegrityVerified]",
+        "# Format: full/path/to/file.txt = hash, size: size in bytes",
         ""
     )
     
@@ -205,24 +205,16 @@ function Write-HashSmithHashEntry {
         [switch]$UseBatching
     )
     
-    # Create relative path for cleaner logs
-    $relativePath = $FilePath
-    if ($BasePath -and $FilePath.StartsWith($BasePath)) {
-        $relativePath = $FilePath.Substring($BasePath.Length).TrimStart('\', '/')
-    }
+    # Use full path as specified (no relative path conversion)
+    $loggedPath = $FilePath
     
-    # Build flags
-    $flags = @()
-    if ($IsSymlink) { $flags += 'S' }
-    if ($RaceConditionDetected) { $flags += 'R' }
-    if ($IntegrityVerified) { $flags += 'I' }
-    $flagString = if ($flags.Count -gt 0) { " [$(($flags -join ','))]" } else { "" }
-    
-    # Format entry
+    # Format entry with EXACT format as specified
     if ($ErrorMessage) {
-        $logEntry = "$relativePath = ERROR($ErrorCategory): $ErrorMessage, Size: $Size, Modified: $($Modified.ToString('yyyy-MM-dd HH:mm:ss'))$flagString"
+        # For errors, still use the exact format but indicate error in hash field
+        $logEntry = "$loggedPath = ERROR($ErrorCategory): $ErrorMessage, size: $Size"
     } else {
-        $logEntry = "$relativePath = $Hash, Size: $Size, Modified: $($Modified.ToString('yyyy-MM-dd HH:mm:ss'))$flagString"
+        # EXACT format: full/path/to/file.txt = hash, size: size in bytes
+        $logEntry = "$loggedPath = $Hash, size: $Size"
     }
     
     if ($UseBatching) {
@@ -398,44 +390,37 @@ function Get-HashSmithExistingEntries {
                 continue
             }
             
-            # Parse successful entries with flags: path = hash, size: bytes, modified: timestamp [flags]
-            if ($line -match '^(.+?)\s*=\s*([a-fA-F0-9]+)\s*,\s*Size:\s*(\d+)\s*,\s*Modified:\s*(.+?)(?:\s*\[([^\]]+)\])?$') {
+            # Parse successful entries: path = hash, size: bytes
+            if ($line -match '^(.+?)\s*=\s*([a-fA-F0-9]+)\s*,\s*size:\s*(\d+)$') {
                 $path = $matches[1]
                 $hash = $matches[2]
                 $size = [long]$matches[3]
-                $modified = [DateTime]::ParseExact($matches[4], 'yyyy-MM-dd HH:mm:ss', $null)
-                $flags = if ($matches[5]) { $matches[5].Split(',') } else { @() }
                 
                 $entries.Processed[$path] = @{
                     Hash = $hash
                     Size = $size
-                    Modified = $modified
-                    IsSymlink = $flags -contains 'S'
-                    RaceConditionDetected = $flags -contains 'R'
-                    IntegrityVerified = $flags -contains 'I'
+                    Modified = [DateTime]::MinValue  # Default since we don't store this anymore
+                    IsSymlink = $false  # Default since we don't store flags anymore
+                    RaceConditionDetected = $false
+                    IntegrityVerified = $false
                 }
                 
                 $entries.Statistics.ProcessedCount++
-                if ($flags -contains 'S') { $entries.Statistics.SymlinkCount++ }
-                if ($flags -contains 'R') { $entries.Statistics.RaceConditionCount++ }
-                if ($flags -contains 'I') { $entries.Statistics.IntegrityVerifiedCount++ }
             }
-            # Parse error entries with category: path = ERROR(category): message, size: bytes, modified: timestamp [flags]
-            elseif ($line -match '^(.+?)\s*=\s*ERROR\(([^)]+)\):\s*(.+?)\s*,\s*Size:\s*(\d+)\s*,\s*Modified:\s*(.+?)(?:\s*\[([^\]]+)\])?$') {
+            # Parse error entries: path = ERROR(category): message, size: bytes
+            elseif ($line -match '^(.+?)\s*=\s*ERROR\(([^)]+)\):\s*(.+?)\s*,\s*size:\s*(\d+)$') {
                 $path = $matches[1]
                 $category = $matches[2]
                 $errorMessage = $matches[3]
                 $size = [long]$matches[4]
-                $modified = [DateTime]::ParseExact($matches[5], 'yyyy-MM-dd HH:mm:ss', $null)
-                $flags = if ($matches[6]) { $matches[6].Split(',') } else { @() }
                 
                 $entries.Failed[$path] = @{
                     Error = $errorMessage
                     ErrorCategory = $category
                     Size = $size
-                    Modified = $modified
-                    IsSymlink = $flags -contains 'S'
-                    RaceConditionDetected = $flags -contains 'R'
+                    Modified = [DateTime]::MinValue  # Default since we don't store this anymore
+                    IsSymlink = $false
+                    RaceConditionDetected = $false
                 }
                 
                 $entries.Statistics.FailedCount++

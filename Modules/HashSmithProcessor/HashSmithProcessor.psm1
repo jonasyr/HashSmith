@@ -107,7 +107,9 @@ function Start-HashSmithFileProcessing {
     
     # Log parallel processing status (only once)
     $safeThreads = if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-        [Math]::Min($MaxThreads, [Math]::Max(2, [Environment]::ProcessorCount / 2))
+        $threads = [Math]::Round([Environment]::ProcessorCount * 0.7)
+        if ($threads -lt 1) { $threads = 1 }
+        [Math]::Min($MaxThreads, $threads)
     } else {
         1
     }
