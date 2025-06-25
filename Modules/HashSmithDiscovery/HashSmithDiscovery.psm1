@@ -4,7 +4,8 @@
 
 .DESCRIPTION
     This module provides comprehensive file discovery capabilities with enhanced validation,
-    symbolic link detection, and completeness testing.
+    symbolic link detection, and completeness testing. Enhanced with professional output
+    and optimized performance.
 #>
 
 # Import required modules
@@ -14,11 +15,12 @@
 
 <#
 .SYNOPSIS
-    Discovers all files in a directory tree with comprehensive validation
+    Discovers all files in a directory tree with comprehensive validation and professional output
 
 .DESCRIPTION
     Performs memory-efficient file discovery using .NET APIs with support for
     hidden files, symbolic links, exclusion patterns, and integrity validation.
+    Enhanced with professional progress reporting and optimized performance.
 
 .PARAMETER Path
     The root path to discover files from
@@ -61,15 +63,13 @@ function Get-HashSmithAllFiles {
     
     Write-HashSmithLog -Message "Starting comprehensive file discovery with enhanced validation" -Level INFO -Component 'DISCOVERY'
     Write-HashSmithLog -Message "Target path: $Path" -Level INFO -Component 'DISCOVERY'
-    Write-HashSmithLog -Message "Include hidden: $IncludeHidden" -Level INFO -Component 'DISCOVERY'
-    Write-HashSmithLog -Message "Include symlinks: $IncludeSymlinks" -Level INFO -Component 'DISCOVERY'
-    Write-HashSmithLog -Message "Strict mode: $StrictMode" -Level INFO -Component 'DISCOVERY'
+    Write-HashSmithLog -Message "Include hidden: $IncludeHidden | Include symlinks: $IncludeSymlinks | Strict mode: $StrictMode" -Level INFO -Component 'DISCOVERY'
     
     $discoveryStart = Get-Date
     $allFiles = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
     $errors = [System.Collections.Generic.List[hashtable]]::new()
     $symlinkCount = 0
-    $timeoutMinutes = 30  # Add discovery timeout
+    $timeoutMinutes = 30  # Discovery timeout
     
     # Test network connectivity first
     if (-not (Test-HashSmithNetworkPath -Path $Path -UseCache)) {
@@ -92,11 +92,11 @@ function Get-HashSmithAllFiles {
         
         Write-HashSmithLog -Message "Using .NET Directory.EnumerateFiles for memory-efficient discovery" -Level DEBUG -Component 'DISCOVERY'
         
-        # Use parallel discovery if PowerShell 7+ is available
+        # Enhanced parallel discovery for PowerShell 7+
         if ($PSVersionTable.PSVersion.Major -ge 7 -and -not $StrictMode) {
-            Write-HashSmithLog -Message "Using parallel file discovery (PowerShell 7+)" -Level INFO -Component 'DISCOVERY'
+            Write-HashSmithLog -Message "Using enhanced parallel file discovery (PowerShell 7+)" -Level INFO -Component 'DISCOVERY'
             
-            # First, get all directories for parallel processing
+            # Get all directories for parallel processing
             $directories = @($normalizedPath)
             try {
                 $directories += [System.IO.Directory]::EnumerateDirectories($normalizedPath, '*', [System.IO.SearchOption]::AllDirectories)
@@ -104,9 +104,9 @@ function Get-HashSmithAllFiles {
                 Write-HashSmithLog -Message "Error enumerating directories: $($_.Exception.Message)" -Level WARN -Component 'DISCOVERY'
             }
             
-            Write-HashSmithLog -Message "📁 Found $($directories.Count) directories to scan" -Level INFO -Component 'DISCOVERY'
+            Write-Host "📁 Scanning $($directories.Count) directories..." -ForegroundColor Cyan
             
-            # Process directories in parallel to discover files
+            # Process directories in parallel with professional progress
             $processedCount = 0
             $skippedCount = 0
             $directoryIndex = 0
@@ -142,7 +142,7 @@ function Get-HashSmithAllFiles {
                         try {
                             $fileInfo = [System.IO.FileInfo]::new($filePath)
                             
-                            # Check if it's a symbolic link (simplified check)
+                            # Enhanced symbolic link detection
                             $isSymlink = ($fileInfo.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint
                             if ($isSymlink) {
                                 $localSymlinks++
@@ -152,7 +152,7 @@ function Get-HashSmithAllFiles {
                                 }
                             }
                             
-                            # Apply exclusion patterns
+                            # Apply exclusion patterns with enhanced matching
                             $shouldExclude = $false
                             foreach ($pattern in $ExcludePatterns) {
                                 if ($fileInfo.Name -like $pattern -or $fileInfo.FullName -like $pattern) {
@@ -193,7 +193,10 @@ function Get-HashSmithAllFiles {
                 }
             } -ThrottleLimit ([Environment]::ProcessorCount)
             
-            # Combine results from parallel processing
+            # Combine results with professional progress display
+            $progressChars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
+            $progressIndex = 0
+            
             foreach ($result in $allFileResults) {
                 $directoryIndex++
                 
@@ -209,33 +212,43 @@ function Get-HashSmithAllFiles {
                 $skippedCount += $result.Skipped
                 $symlinkCount += $result.Symlinks
                 
-                # Update progress every few directories with overwrite capability
-                if ($directoryIndex % 10 -eq 0 -or $directoryIndex -eq $directories.Count) {
-                    $progressMessage = "🔍 Discovered: $processedCount files | Skipped: $skippedCount | Dirs: $directoryIndex/$($directories.Count)"
-                    Write-Host "`r$progressMessage" -NoNewline -ForegroundColor Cyan
+                # Professional progress update with clean formatting
+                if ($directoryIndex % 50 -eq 0 -or $directoryIndex -eq $directories.Count) {
+                    $char = $progressChars[$progressIndex % $progressChars.Length]
+                    $percent = [Math]::Round(($directoryIndex / $directories.Count) * 100, 1)
+                    $progressMessage = "$char Discovered: $processedCount files | Skipped: $skippedCount | Progress: $percent%"
+                    Write-Host "`r$progressMessage$(' ' * 10)" -NoNewline -ForegroundColor Cyan
+                    $progressIndex++
                 }
             }
             
             # Clear the progress line
-            Write-Host "`r$(' ' * 120)`r" -NoNewline
+            Write-Host "`r$(' ' * 80)`r" -NoNewline
             
         } else {
-            # Use sequential discovery for PowerShell 5.1 or strict mode
-            Write-HashSmithLog -Message "Using sequential file discovery" -Level INFO -Component 'DISCOVERY'
+            # Enhanced sequential discovery for PowerShell 5.1 or strict mode
+            Write-HashSmithLog -Message "Using sequential file discovery with enhanced progress" -Level INFO -Component 'DISCOVERY'
+            Write-Host "🔍 Sequential discovery mode..." -ForegroundColor Gray
             
             # Enumerate files in streaming fashion to reduce memory usage
             $fileEnumerator = [System.IO.Directory]::EnumerateFiles($normalizedPath, '*', $enumOptions)
             $processedCount = 0
             $skippedCount = 0
             $lastProgressUpdate = Get-Date
+            $progressChars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
+            $progressIndex = 0
             
             foreach ($filePath in $fileEnumerator) {
                 try {
-                    # Progress reporting with overwrite capability
-                    if (((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 1) {
-                        $progressMessage = "🔍 Discovering files: $processedCount found | $skippedCount skipped"
-                        Write-Host "`r$progressMessage" -NoNewline -ForegroundColor Cyan
+                    # Professional progress reporting with reduced frequency
+                    if (((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 2) {
+                        $char = $progressChars[$progressIndex % $progressChars.Length]
+                        $elapsed = ((Get-Date) - $discoveryStart).TotalSeconds
+                        $rate = if ($elapsed -gt 0) { [Math]::Round($processedCount / $elapsed, 0) } else { 0 }
+                        $progressMessage = "$char Discovering: $processedCount found | $skippedCount skipped | $rate files/sec"
+                        Write-Host "`r$progressMessage$(' ' * 10)" -NoNewline -ForegroundColor Cyan
                         $lastProgressUpdate = Get-Date
+                        $progressIndex++
                     }
                     
                     # Check for discovery timeout
@@ -254,7 +267,7 @@ function Get-HashSmithAllFiles {
                     
                     $fileInfo = [System.IO.FileInfo]::new($filePath)
                     
-                    # Handle symbolic links
+                    # Enhanced symbolic link handling
                     $isSymlink = Test-HashSmithSymbolicLink -Path $filePath
                     if ($isSymlink) {
                         $symlinkCount++
@@ -265,7 +278,7 @@ function Get-HashSmithAllFiles {
                         }
                     }
                     
-                    # Apply exclusion patterns
+                    # Apply exclusion patterns with enhanced logic
                     $shouldExclude = $false
                     foreach ($pattern in $ExcludePatterns) {
                         if ($fileInfo.Name -like $pattern -or $fileInfo.FullName -like $pattern) {
@@ -277,7 +290,7 @@ function Get-HashSmithAllFiles {
                     }
                     
                     if (-not $shouldExclude) {
-                        # Strict mode validation
+                        # Enhanced strict mode validation
                         if ($StrictMode) {
                             # Verify file is still accessible
                             if (-not (Test-Path -LiteralPath $fileInfo.FullName)) {
@@ -317,20 +330,18 @@ function Get-HashSmithAllFiles {
     catch {
         Write-HashSmithLog -Message "Critical error during file discovery: $($_.Exception.Message)" -Level ERROR -Component 'DISCOVERY'
         $stats = Get-HashSmithStatistics
-        $stats.DiscoveryErrors += @{
-            Path = $Path
-            Error = $_.Exception.Message
-            Timestamp = Get-Date
-            Category = 'Critical'
-        }
+        Add-HashSmithStatistic -Name 'DiscoveryErrors' -Amount 1
         throw
     }
     
     $discoveryDuration = (Get-Date) - $discoveryStart
     
-    # Update statistics properly using the new functions
+    # Update statistics using thread-safe functions
     Set-HashSmithStatistic -Name 'FilesDiscovered' -Value $allFiles.Count
     Set-HashSmithStatistic -Name 'FilesSymlinks' -Value $symlinkCount
+    
+    # Professional completion summary
+    Write-Host "✅ Discovery completed in $($discoveryDuration.TotalSeconds.ToString('F2'))s" -ForegroundColor Green
     
     Write-HashSmithLog -Message "File discovery completed in $($discoveryDuration.TotalSeconds.ToString('F2')) seconds" -Level SUCCESS -Component 'DISCOVERY'
     Write-HashSmithLog -Message "Files found: $($allFiles.Count)" -Level STATS -Component 'DISCOVERY'
@@ -338,6 +349,7 @@ function Get-HashSmithAllFiles {
     Write-HashSmithLog -Message "Symbolic links found: $symlinkCount" -Level STATS -Component 'DISCOVERY'
     Write-HashSmithLog -Message "Discovery errors: $($errors.Count)" -Level $(if($errors.Count -gt 0){'WARN'}else{'STATS'}) -Component 'DISCOVERY'
     
+    # Enhanced test mode validation
     if ($TestMode) {
         Write-HashSmithLog -Message "Test Mode: Validating file discovery completeness and integrity" -Level INFO -Component 'TEST'
         Test-HashSmithFileDiscoveryCompleteness -Path $Path -DiscoveredFiles $allFiles.ToArray() -IncludeHidden:$IncludeHidden -IncludeSymlinks:$IncludeSymlinks -StrictMode:$StrictMode
@@ -358,11 +370,11 @@ function Get-HashSmithAllFiles {
 
 <#
 .SYNOPSIS
-    Tests file discovery completeness and accuracy
+    Tests file discovery completeness and accuracy with enhanced validation
 
 .DESCRIPTION
     Cross-validates file discovery results using multiple methods to ensure
-    completeness and accuracy of the discovery process.
+    completeness and accuracy of the discovery process. Enhanced with professional output.
 
 .PARAMETER Path
     The root path that was discovered
@@ -399,6 +411,7 @@ function Test-HashSmithFileDiscoveryCompleteness {
     )
     
     Write-HashSmithLog -Message "Running enhanced file discovery completeness test" -Level INFO -Component 'TEST'
+    Write-Host "🧪 Validating discovery completeness..." -ForegroundColor Yellow
     
     # Cross-validate with PowerShell Get-ChildItem
     $psFiles = @()
@@ -423,19 +436,22 @@ function Test-HashSmithFileDiscoveryCompleteness {
         $dotNetCount = $DiscoveredFiles.Count
         $psCount = $psFiles.Count
         
-        Write-HashSmithLog -Message ".NET Discovery: $dotNetCount files" -Level INFO -Component 'TEST'
-        Write-HashSmithLog -Message "PowerShell Discovery: $psCount files" -Level INFO -Component 'TEST'
+        Write-Host "   📊 .NET Discovery: $dotNetCount files" -ForegroundColor Cyan
+        Write-Host "   📊 PowerShell Discovery: $psCount files" -ForegroundColor Cyan
         
         # Allow for small discrepancies due to timing
         $tolerance = if ($StrictMode) { 0 } else { [Math]::Max(1, [Math]::Floor($dotNetCount * 0.001)) }
         $difference = [Math]::Abs($dotNetCount - $psCount)
         
         if ($difference -gt $tolerance) {
+            Write-Host "   ⚠️  File count mismatch detected! Difference: $difference (tolerance: $tolerance)" -ForegroundColor Red
             Write-HashSmithLog -Message "WARNING: File count mismatch detected! Difference: $difference (tolerance: $tolerance)" -Level WARN -Component 'TEST'
             Write-HashSmithLog -Message "This may indicate discovery issues or timing differences" -Level WARN -Component 'TEST'
             
-            # Detailed analysis in strict mode
+            # Enhanced detailed analysis in strict mode
             if ($StrictMode) {
+                Write-Host "   🔍 Running detailed analysis..." -ForegroundColor Yellow
+                
                 $dotNetPaths = $DiscoveredFiles | ForEach-Object { $_.FullName.ToLowerInvariant() }
                 $psPaths = $psFiles | ForEach-Object { $_.FullName.ToLowerInvariant() }
                 
@@ -443,6 +459,7 @@ function Test-HashSmithFileDiscoveryCompleteness {
                 $missingInPS = $dotNetPaths | Where-Object { $_ -notin $psPaths }
                 
                 if ($missingInDotNet) {
+                    Write-Host "   ❌ Files found by PowerShell but not .NET: $($missingInDotNet.Count)" -ForegroundColor Red
                     Write-HashSmithLog -Message "Files found by PowerShell but not .NET: $($missingInDotNet.Count)" -Level ERROR -Component 'TEST'
                     $missingInDotNet | Select-Object -First 10 | ForEach-Object {
                         Write-HashSmithLog -Message "  Missing: $_" -Level DEBUG -Component 'TEST'
@@ -450,6 +467,7 @@ function Test-HashSmithFileDiscoveryCompleteness {
                 }
                 
                 if ($missingInPS) {
+                    Write-Host "   ❌ Files found by .NET but not PowerShell: $($missingInPS.Count)" -ForegroundColor Red
                     Write-HashSmithLog -Message "Files found by .NET but not PowerShell: $($missingInPS.Count)" -Level ERROR -Component 'TEST'
                     $missingInPS | Select-Object -First 10 | ForEach-Object {
                         Write-HashSmithLog -Message "  Extra: $_" -Level DEBUG -Component 'TEST'
@@ -461,16 +479,19 @@ function Test-HashSmithFileDiscoveryCompleteness {
                 }
             }
         } else {
+            Write-Host "   ✅ Discovery completeness test PASSED" -ForegroundColor Green
             Write-HashSmithLog -Message "File discovery completeness test PASSED (difference: $difference, tolerance: $tolerance)" -Level SUCCESS -Component 'TEST'
         }
         
-        # Additional validation in strict mode
+        # Enhanced additional validation in strict mode
         if ($StrictMode) {
+            Write-Host "   🔧 Running additional strict mode validations..." -ForegroundColor Yellow
             Write-HashSmithLog -Message "Running additional strict mode validations" -Level INFO -Component 'TEST'
             
             # Check for duplicate paths
             $duplicates = $DiscoveredFiles | Group-Object FullName | Where-Object Count -gt 1
             if ($duplicates) {
+                Write-Host "   ⚠️  Duplicate file paths detected: $($duplicates.Count)" -ForegroundColor Yellow
                 Write-HashSmithLog -Message "WARNING: Duplicate file paths detected: $($duplicates.Count)" -Level WARN -Component 'TEST'
                 $duplicates | Select-Object -First 5 | ForEach-Object {
                     Write-HashSmithLog -Message "  Duplicate: $($_.Name)" -Level DEBUG -Component 'TEST'
@@ -480,18 +501,23 @@ function Test-HashSmithFileDiscoveryCompleteness {
             # Validate path lengths
             $longPaths = $DiscoveredFiles | Where-Object { $_.FullName.Length -gt 260 }
             if ($longPaths) {
+                Write-Host "   📏 Long paths detected: $($longPaths.Count)" -ForegroundColor Cyan
                 Write-HashSmithLog -Message "Long paths detected: $($longPaths.Count)" -Level INFO -Component 'TEST'
             }
             
             # Check for potential encoding issues
             $unicodePaths = $DiscoveredFiles | Where-Object { $_.FullName -match '[^\x00-\x7F]' }
             if ($unicodePaths) {
+                Write-Host "   🌐 Unicode paths detected: $($unicodePaths.Count)" -ForegroundColor Cyan
                 Write-HashSmithLog -Message "Unicode paths detected: $($unicodePaths.Count)" -Level INFO -Component 'TEST'
             }
+            
+            Write-Host "   ✅ Strict mode validation completed" -ForegroundColor Green
         }
         
     }
     catch {
+        Write-Host "   ❌ File discovery test failed: $($_.Exception.Message)" -ForegroundColor Red
         Write-HashSmithLog -Message "File discovery test failed: $($_.Exception.Message)" -Level ERROR -Component 'TEST'
     }
 }

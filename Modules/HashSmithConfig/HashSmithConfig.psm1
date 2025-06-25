@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     This module manages all configuration settings, global variables, and statistics
-    for the HashSmith file integrity verification system.
+    for the HashSmith file integrity verification system. Enhanced with thread safety.
 #>
 
 #region Module Variables
@@ -27,22 +27,9 @@ $Script:Config = @{
 # Modern HashSmith configuration (initialized by Initialize-HashSmithConfig)
 $Script:HashSmithConfig = $null
 
-$Script:Statistics = @{
-    StartTime = Get-Date
-    FilesDiscovered = 0
-    FilesProcessed = 0
-    FilesSkipped = 0
-    FilesError = 0
-    FilesSymlinks = 0
-    FilesRaceCondition = 0
-    BytesProcessed = 0
-    NetworkPaths = 0
-    LongPaths = 0
-    DiscoveryErrors = @()
-    ProcessingErrors = @()
-    RetriableErrors = 0
-    NonRetriableErrors = 0
-}
+# Thread-safe statistics with proper synchronization
+$Script:Statistics = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
+$Script:StatisticsLock = [System.Object]::new()
 
 $Script:CircuitBreaker = @{
     FailureCount = 0
@@ -52,8 +39,45 @@ $Script:CircuitBreaker = @{
 
 $Script:ExitCode = 0
 $Script:LogBatch = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
-$Script:NetworkConnections = @{}
-$Script:StructuredLogs = @()
+$Script:NetworkConnections = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
+$Script:StructuredLogs = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
+
+#endregion
+
+#region Private Functions
+
+<#
+.SYNOPSIS
+    Initializes the statistics dictionary with default values
+
+.DESCRIPTION
+    Sets up the statistics with thread-safe defaults
+#>
+function Initialize-Statistics {
+    [CmdletBinding()]
+    param()
+    
+    $defaultStats = @{
+        StartTime = Get-Date
+        FilesDiscovered = 0
+        FilesProcessed = 0
+        FilesSkipped = 0
+        FilesError = 0
+        FilesSymlinks = 0
+        FilesRaceCondition = 0
+        BytesProcessed = [long]0
+        NetworkPaths = 0
+        LongPaths = 0
+        DiscoveryErrors = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
+        ProcessingErrors = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
+        RetriableErrors = 0
+        NonRetriableErrors = 0
+    }
+    
+    foreach ($key in $defaultStats.Keys) {
+        $Script:Statistics.TryAdd($key, $defaultStats[$key]) | Out-Null
+    }
+}
 
 #endregion
 
@@ -66,6 +90,7 @@ $Script:StructuredLogs = @()
 .DESCRIPTION
     Sets up the default configuration and applies any overrides. 
     This function must be called before using other HashSmith functions.
+    Enhanced with thread safety.
 
 .PARAMETER ConfigOverrides
     Optional hashtable of configuration overrides to apply
@@ -117,7 +142,10 @@ function Initialize-HashSmithConfig {
         }
     }
     
-    Write-Verbose "HashSmith configuration initialized"
+    # Initialize thread-safe statistics
+    Initialize-Statistics
+    
+    Write-Verbose "HashSmith configuration initialized with thread safety"
 }
 
 <#
@@ -145,10 +173,11 @@ function Get-HashSmithConfig {
 
 <#
 .SYNOPSIS
-    Gets the current HashSmith statistics
+    Gets the current HashSmith statistics with thread safety
 
 .DESCRIPTION
-    Returns the current statistics hashtable for monitoring progress
+    Returns the current statistics hashtable for monitoring progress.
+    Enhanced with thread-safe access.
 
 .EXAMPLE
     $stats = Get-HashSmithStatistics
@@ -158,7 +187,22 @@ function Get-HashSmithStatistics {
     [OutputType([hashtable])]
     param()
     
-    return $Script:Statistics.Clone()
+    [System.Threading.Monitor]::Enter($Script:StatisticsLock)
+    try {
+        $result = @{}
+        foreach ($key in $Script:Statistics.Keys) {
+            $value = $Script:Statistics[$key]
+            if ($value -is [System.Collections.Concurrent.ConcurrentBag[object]]) {
+                $result[$key] = @($value.ToArray())
+            } else {
+                $result[$key] = $value
+            }
+        }
+        return $result
+    }
+    finally {
+        [System.Threading.Monitor]::Exit($Script:StatisticsLock)
+    }
 }
 
 <#
@@ -199,10 +243,10 @@ function Get-HashSmithExitCode {
 
 <#
 .SYNOPSIS
-    Sets the HashSmith exit code
+    Sets the HashSmith exit code with thread safety
 
 .DESCRIPTION
-    Sets the exit code for the HashSmith operation
+    Sets the exit code for the HashSmith operation with atomic operation
 
 .PARAMETER ExitCode
     The exit code to set
@@ -217,15 +261,17 @@ function Set-HashSmithExitCode {
         [int]$ExitCode
     )
     
-    $Script:ExitCode = $ExitCode
+    # Use atomic operation for thread safety
+    [System.Threading.Interlocked]::Exchange([ref]$Script:ExitCode, $ExitCode) | Out-Null
 }
 
 <#
 .SYNOPSIS
-    Gets the log batch queue
+    Gets the log batch queue with enhanced initialization
 
 .DESCRIPTION
-    Returns the current log batch queue for batch logging operations
+    Returns the current log batch queue for batch logging operations.
+    Enhanced with proper initialization checks.
 
 .EXAMPLE
     $logBatch = Get-HashSmithLogBatch
@@ -245,17 +291,17 @@ function Get-HashSmithLogBatch {
 
 <#
 .SYNOPSIS
-    Gets the network connections cache
+    Gets the network connections cache with thread safety
 
 .DESCRIPTION
-    Returns the current network connections cache
+    Returns the current network connections cache with proper synchronization
 
 .EXAMPLE
     $connections = Get-HashSmithNetworkConnections
 #>
 function Get-HashSmithNetworkConnections {
     [CmdletBinding()]
-    [OutputType([hashtable])]
+    [OutputType([System.Collections.Concurrent.ConcurrentDictionary[string, object]])]
     param()
     
     return $Script:NetworkConnections
@@ -263,7 +309,7 @@ function Get-HashSmithNetworkConnections {
 
 <#
 .SYNOPSIS
-    Gets the structured logs collection
+    Gets the structured logs collection with thread safety
 
 .DESCRIPTION
     Returns the current structured logs collection for JSON output
@@ -276,15 +322,15 @@ function Get-HashSmithStructuredLogs {
     [OutputType([array])]
     param()
     
-    return $Script:StructuredLogs
+    return @($Script:StructuredLogs.ToArray())
 }
 
 <#
 .SYNOPSIS
-    Adds a structured log entry
+    Adds a structured log entry with thread safety
 
 .DESCRIPTION
-    Adds an entry to the structured logs collection
+    Adds an entry to the structured logs collection using thread-safe operations
 
 .PARAMETER LogEntry
     The log entry to add
@@ -299,29 +345,15 @@ function Add-HashSmithStructuredLog {
         [hashtable]$LogEntry
     )
     
-    $Script:StructuredLogs += $LogEntry
+    $Script:StructuredLogs.Add($LogEntry)
 }
 
 <#
 .SYNOPSIS
-    Initializes HashSmith configuration with custom values
+    Resets HashSmith statistics with thread safety
 
 .DESCRIPTION
-    Allows customization of the default configuration values
-
-.PARAMETER ConfigOverrides
-    Hashtable of configuration overrides
-
-.EXAMPLE
-    Initialize-HashSmithConfig -ConfigOverrides @{ BufferSize = 8MB }
-#>
-
-<#
-.SYNOPSIS
-    Resets HashSmith statistics
-
-.DESCRIPTION
-    Resets all statistics counters to their initial state
+    Resets all statistics counters to their initial state using proper synchronization
 
 .EXAMPLE
     Reset-HashSmithStatistics
@@ -330,30 +362,22 @@ function Reset-HashSmithStatistics {
     [CmdletBinding()]
     param()
     
-    $Script:Statistics = @{
-        StartTime = Get-Date
-        FilesDiscovered = 0
-        FilesProcessed = 0
-        FilesSkipped = 0
-        FilesError = 0
-        FilesSymlinks = 0
-        FilesRaceCondition = 0
-        BytesProcessed = 0
-        NetworkPaths = 0
-        LongPaths = 0
-        DiscoveryErrors = @()
-        ProcessingErrors = @()
-        RetriableErrors = 0
-        NonRetriableErrors = 0
+    [System.Threading.Monitor]::Enter($Script:StatisticsLock)
+    try {
+        $Script:Statistics.Clear()
+        Initialize-Statistics
+    }
+    finally {
+        [System.Threading.Monitor]::Exit($Script:StatisticsLock)
     }
 }
 
 <#
 .SYNOPSIS
-    Updates a specific statistic value
+    Updates a specific statistic value with thread safety
 
 .DESCRIPTION
-    Updates a specific statistic in the global statistics hashtable
+    Updates a specific statistic in the global statistics hashtable using atomic operations
 
 .PARAMETER Name
     The name of the statistic to update
@@ -374,15 +398,15 @@ function Set-HashSmithStatistic {
         $Value
     )
     
-    $Script:Statistics[$Name] = $Value
+    $Script:Statistics.AddOrUpdate($Name, $Value, { param($key, $oldValue) $Value })
 }
 
 <#
 .SYNOPSIS
-    Increments a specific statistic value
+    Increments a specific statistic value with thread safety
 
 .DESCRIPTION
-    Increments a specific statistic in the global statistics hashtable
+    Increments a specific statistic in the global statistics hashtable using atomic operations
 
 .PARAMETER Name
     The name of the statistic to increment
@@ -402,35 +426,22 @@ function Add-HashSmithStatistic {
         [long]$Amount = 1
     )
     
-    if ($Script:Statistics.ContainsKey($Name)) {
-        $Script:Statistics[$Name] += $Amount
-    } else {
-        $Script:Statistics[$Name] = $Amount
-    }
+    $Script:Statistics.AddOrUpdate($Name, $Amount, { 
+        param($key, $oldValue) 
+        if ($oldValue -is [long] -or $oldValue -is [int]) {
+            return $oldValue + $Amount
+        } else {
+            return $Amount
+        }
+    })
 }
 
-#endregion
-
-#region Configuration Functions
-
 <#
 .SYNOPSIS
-    Initializes the HashSmith configuration with default values
+    Sets a HashSmith configuration value with validation
 
 .DESCRIPTION
-    Initializes the HashSmith configuration hashtable with default values,
-    resetting all configuration to a known state
-
-.EXAMPLE
-    Initialize-HashSmithConfig
-#>
-
-<#
-.SYNOPSIS
-    Sets a HashSmith configuration value
-
-.DESCRIPTION
-    Sets a specific configuration value in the HashSmith configuration
+    Sets a specific configuration value in the HashSmith configuration with proper validation
 
 .PARAMETER Key
     The configuration key to set
@@ -460,9 +471,14 @@ function Set-HashSmithConfig {
     } else {
         $Script:Config[$Key] = $Value
     }
+    
+    Write-Verbose "Configuration updated: $Key = $Value"
 }
 
 #endregion
+
+# Initialize statistics on module load
+Initialize-Statistics
 
 # Export public functions
 Export-ModuleMember -Function @(

@@ -5,6 +5,7 @@
 .DESCRIPTION
     This module orchestrates the main file processing workflow with parallel execution,
     progress tracking, error handling, and comprehensive result management.
+    Enhanced with professional output and optimized performance.
 #>
 
 # Import required modules
@@ -14,12 +15,12 @@
 
 <#
 .SYNOPSIS
-    Processes files with enhanced parallel execution and error handling
+    Processes files with enhanced parallel execution and professional output
 
 .DESCRIPTION
     Orchestrates the main file processing workflow with chunked processing,
-    parallel execution (PowerShell 7+), progress tracking, and comprehensive
-    error handling and recovery.
+    parallel execution (PowerShell 7+), professional progress tracking, and comprehensive
+    error handling and recovery. Enhanced with optimized terminal output.
 
 .PARAMETER Files
     Array of FileInfo objects to process
@@ -105,23 +106,25 @@ function Start-HashSmithFileProcessing {
     Write-HashSmithLog -Message "Starting enhanced file processing with $($Files.Count) files" -Level INFO -Component 'PROCESS'
     Write-HashSmithLog -Message "Algorithm: $Algorithm, Strict Mode: $StrictMode, Verify Integrity: $VerifyIntegrity" -Level INFO -Component 'PROCESS'
     
-    # Log parallel processing status (only once)
+    # Calculate optimal thread count for stability
     $safeThreads = if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-        $threads = [Math]::Round([Environment]::ProcessorCount * 0.7)
+        $threads = [Math]::Round([Environment]::ProcessorCount * 0.75)  # Use 75% of cores for stability
         if ($threads -lt 1) { $threads = 1 }
         [Math]::Min($MaxThreads, $threads)
     } else {
         1
     }
     
+    # Log processing mode once
     if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-        Write-HashSmithLog -Message "Parallel processing enabled: $safeThreads threads (reduced from $MaxThreads for stability)" -Level INFO -Component 'PROCESS'
+        Write-HashSmithLog -Message "Parallel processing enabled: $safeThreads threads (optimized for stability)" -Level INFO -Component 'PROCESS'
     } elseif ($UseParallel) {
-        Write-HashSmithLog -Message "Parallel processing requested but using sequential processing (PowerShell 5.1)" -Level WARNING -Component 'PROCESS'
+        Write-HashSmithLog -Message "Parallel processing requested but using sequential (PowerShell 5.1)" -Level INFO -Component 'PROCESS'
     } else {
-        Write-HashSmithLog -Message "Sequential processing (parallel disabled)" -Level INFO -Component 'PROCESS'
+        Write-HashSmithLog -Message "Sequential processing mode" -Level INFO -Component 'PROCESS'
     }
     
+    # Initialize processing variables
     $processedCount = 0
     $errorCount = 0
     $totalBytes = 0
@@ -129,19 +132,22 @@ function Start-HashSmithFileProcessing {
     $lastProgressUpdate = Get-Date
     $stats = Get-HashSmithStatistics
     
-    # Get configuration values for parallel processing
+    # Get configuration values
     $config = Get-HashSmithConfig
     
     # Process files in chunks for memory efficiency
+    $totalChunks = [Math]::Ceiling($Files.Count / $ChunkSize)
+    
     for ($i = 0; $i -lt $Files.Count; $i += $ChunkSize) {
         $endIndex = [Math]::Min($i + $ChunkSize - 1, $Files.Count - 1)
         $chunk = $Files[$i..$endIndex]
         $chunkNumber = [Math]::Floor($i / $ChunkSize) + 1
-        $totalChunks = [Math]::Ceiling($Files.Count / $ChunkSize)
         
-        Write-HashSmithLog -Message "Processing chunk $chunkNumber of $totalChunks ($($chunk.Count) files)" -Level PROGRESS -Component 'PROCESS'
+        # Professional chunk header
+        Write-Host ""
+        Write-Host "⚡ Processing Chunk $chunkNumber of $totalChunks" -ForegroundColor Cyan
+        Write-Host "   Files: $($chunk.Count) | Range: $($i + 1) - $($endIndex + 1)" -ForegroundColor Gray
         
-        # Initialize chunk timing for all processing paths
         $chunkStartTime = Get-Date
         
         # Test network connectivity before processing chunk
@@ -150,20 +156,23 @@ function Start-HashSmithFileProcessing {
             break
         }
         
-        # Guard parallel processing behind PowerShell version check
+        # Enhanced parallel processing with professional output
         if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-            # Initialize progress tracking variables
+            # Initialize progress variables
             $totalChunkFiles = $chunk.Count
             $lastProgressCount = 0
             $lastProgressTime = Get-Date
             
-            # Process files with parallel jobs and show live progress
+            # Professional progress header
+            Write-Host "   🚀 Parallel execution with $safeThreads threads" -ForegroundColor Green
+            
+            # Process files with optimized parallel jobs
             $chunkResults = $chunk | ForEach-Object -Parallel {
                 # Import required variables into parallel runspace
                 $Algorithm = $using:Algorithm
                 $RetryCount = $using:RetryCount
                 
-                # Process single file with minimal complexity
+                # Process single file with optimized approach
                 $file = $_
                 $result = @{
                     Path = $file.FullName
@@ -184,10 +193,10 @@ function Start-HashSmithFileProcessing {
                 $startTime = Get-Date
                 
                 try {
-                    # Use streaming hash computation to support files of any size
+                    # Optimized streaming hash computation
                     $hashAlgorithm = [System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)
                     try {
-                        # Use FileStream for files of any size (not ReadAllBytes which is limited to 2GB)
+                        # Enhanced file stream with optimal buffer size
                         $fileStream = [System.IO.File]::OpenRead($file.FullName)
                         try {
                             $hashBytes = $hashAlgorithm.ComputeHash($fileStream)
@@ -195,8 +204,8 @@ function Start-HashSmithFileProcessing {
                             $result.Hash = $result.Hash.ToLower()
                             $result.Success = $true
                             
-                            # Small delay to reduce system strain and prevent freezes
-                            Start-Sleep -Milliseconds 75
+                            # Reduced delay to improve performance
+                            Start-Sleep -Milliseconds 25
                         }
                         finally {
                             if ($fileStream) { $fileStream.Dispose() }
@@ -216,11 +225,11 @@ function Start-HashSmithFileProcessing {
                 
             } -ThrottleLimit $safeThreads -AsJob
             
-            # Show real-time progress while jobs are running
+            # Professional progress monitoring
             $spinChars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
             $spinIndex = 0
             
-            # Monitor the parallel jobs and show progress with smart timeout
+            # Monitor jobs with enhanced timeout handling
             while ($chunkResults.State -eq 'Running') {
                 $char = $spinChars[$spinIndex % $spinChars.Length]
                 $elapsed = (Get-Date) - $chunkStartTime
@@ -230,12 +239,12 @@ function Start-HashSmithFileProcessing {
                     "$([Math]::Floor($elapsed.TotalSeconds))s" 
                 }
                 
-                # Try to estimate progress by checking completed results
+                # Enhanced progress estimation
                 $currentResults = @()
                 try {
                     $currentResults = @(Receive-Job $chunkResults -Keep -ErrorAction SilentlyContinue)
                 } catch {
-                    # Ignore errors when checking job progress
+                    # Silently handle progress check errors
                 }
                 
                 $completedCount = $currentResults.Count
@@ -243,27 +252,27 @@ function Start-HashSmithFileProcessing {
                     [Math]::Round(($completedCount / $totalChunkFiles) * 100, 1) 
                 } else { 0 }
                 
-                # Smart timeout logic - check for progress, not just time
+                # Smart timeout with progress tracking
                 $timeSinceLastProgress = (Get-Date) - $lastProgressTime
                 if ($completedCount -gt $lastProgressCount) {
                     $lastProgressCount = $completedCount
                     $lastProgressTime = Get-Date
-                } elseif ($timeSinceLastProgress.TotalMinutes -gt 20) {
-                    # Only timeout if no progress for 20 minutes
-                    Write-Host "`r⚠️  No progress for 20 minutes, stopping chunk..." -ForegroundColor Red
+                } elseif ($timeSinceLastProgress.TotalMinutes -gt 15) {
+                    # Timeout after 15 minutes of no progress
+                    Write-Host "`r   ⚠️  No progress for 15 minutes, stopping chunk..." -ForegroundColor Red
                     Stop-Job $chunkResults -ErrorAction SilentlyContinue
                     break
                 }
                 
-                # Create a more compact progress message
-                $progressMsg = "$char Chunk $chunkNumber/$totalChunks | $completedCount/$totalChunkFiles ($progressPercent%) | $elapsedStr"
+                # Professional progress display
+                $progressMsg = "   $char Processing: $completedCount/$totalChunkFiles ($progressPercent%) | $elapsedStr"
                 Write-Host "`r$progressMsg$(' ' * 10)" -NoNewline -ForegroundColor Yellow
                 
-                Start-Sleep -Milliseconds 200
+                Start-Sleep -Milliseconds 150
                 $spinIndex++
             }
             
-            # Get the final results
+            # Get final results with error handling
             try {
                 $chunkResults = Receive-Job $chunkResults -Wait -ErrorAction Stop
                 Remove-Job $chunkResults -Force -ErrorAction SilentlyContinue
@@ -273,49 +282,58 @@ function Start-HashSmithFileProcessing {
                 $chunkResults = @()
             }
             
-            # Clear the progress line
+            # Clear progress line
             Write-Host "`r$(' ' * 80)`r" -NoNewline
         } else {
-            # Process chunk sequentially (PowerShell 5.1 or parallel disabled)
+            # Enhanced sequential processing
+            Write-Host "   ⚙️  Sequential processing mode" -ForegroundColor Gray
             $chunkResults = @()
             $chunkFileCount = 0
+            
             foreach ($file in $chunk) {
                 $chunkFileCount++
                 
-                # Show spinner with current file being processed
+                # Professional file progress with clean formatting
                 $fileName = Split-Path $file.FullName -Leaf
-                $chunkInfo = "Chunk $chunkNumber of $totalChunks"
-                Show-HashSmithFileSpinner -CurrentFile $fileName -TotalFiles $chunk.Count -ProcessedFiles $chunkFileCount -ChunkInfo $chunkInfo
+                $progressPercent = [Math]::Round(($chunkFileCount / $chunk.Count) * 100, 1)
+                
+                # Clean single-line progress update
+                Write-Host "`r   🔄 Processing: $fileName ($progressPercent%)" -NoNewline -ForegroundColor Cyan
                 
                 $result = Get-HashSmithFileHashSafe -Path $file.FullName -Algorithm $Algorithm -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -VerifyIntegrity:$VerifyIntegrity -StrictMode:$StrictMode -PreIntegritySnapshot $file.IntegritySnapshot
                 
-                # Add additional properties expected by the result processor and fix property mapping
+                # Enhanced result mapping
                 $result.Path = $file.FullName
                 $result.Size = $file.Length
                 $result.Modified = $file.LastWriteTime
                 $result.IsSymlink = Test-HashSmithSymbolicLink -Path $file.FullName
                 
-                # Map hash function result properties to expected processor properties
+                # Map hash function result properties
                 if (-not $result.ContainsKey('IntegrityVerified')) {
                     $result.IntegrityVerified = if ($result.ContainsKey('Integrity')) { [bool]$result.Integrity } else { $false }
                 }
                 
                 $chunkResults += $result
                 
-                # Add small delay to reduce system load and prevent freezes
-                Start-Sleep -Milliseconds 50
+                # Optimized delay for system load management
+                Start-Sleep -Milliseconds 10
             }
             
-            # Clear the spinner line after chunk completion
-            Clear-HashSmithFileSpinner
+            # Clear progress line
+            Write-Host "`r$(' ' * 80)`r" -NoNewline
         }
         
-        # Write results and update statistics
+        # Process results with enhanced error handling and logging
+        $chunkSuccessCount = 0
+        $chunkErrorCount = 0
+        
         foreach ($result in $chunkResults) {
             $processedCount++
             
             if ($result.Success) {
-                # Write to log with error handling
+                $chunkSuccessCount++
+                
+                # Write to log with enhanced error handling
                 try {
                     Write-HashSmithHashEntry -LogPath $LogPath -FilePath $result.Path -Hash $result.Hash -Size $result.Size -Modified $result.Modified -BasePath $BasePath -IsSymlink $result.IsSymlink -RaceConditionDetected $result.RaceConditionDetected -IntegrityVerified $result.IntegrityVerified -UseBatching
                 }
@@ -340,7 +358,9 @@ function Start-HashSmithFileProcessing {
                     Add-HashSmithStatistic -Name 'FilesRaceCondition' -Amount 1
                 }
             } else {
-                # Write error to log with error handling
+                $chunkErrorCount++
+                
+                # Write error to log with enhanced handling
                 try {
                     Write-HashSmithHashEntry -LogPath $LogPath -FilePath $result.Path -Size $result.Size -Modified $result.Modified -ErrorMessage $result.Error -ErrorCategory $result.ErrorCategory -BasePath $BasePath -IsSymlink $result.IsSymlink -RaceConditionDetected $result.RaceConditionDetected -UseBatching
                 }
@@ -351,63 +371,51 @@ function Start-HashSmithFileProcessing {
                 $errorCount++
                 Add-HashSmithStatistic -Name 'FilesError' -Amount 1
                 
-                # Categorize errors
+                # Enhanced error categorization
                 if ($result.ErrorCategory -in @('IO', 'Unknown')) {
                     Add-HashSmithStatistic -Name 'RetriableErrors' -Amount 1
                 } else {
                     Add-HashSmithStatistic -Name 'NonRetriableErrors' -Amount 1
                 }
             }
-            
-            # Update progress with enhanced single-line display
-            if ($ShowProgress -and ((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 1) {
-                $percent = [Math]::Round(($processedCount / $Files.Count) * 100, 1)
-                
-                $throughput = if ($totalBytes -gt 0) { ($totalBytes / 1MB) / ((Get-Date) - $stats.StartTime).TotalSeconds } else { 0 }
-                $eta = if ($percent -gt 0) { 
-                    $elapsed = ((Get-Date) - $stats.StartTime).TotalSeconds
-                    $remaining = ($elapsed / $percent) * (100 - $percent)
-                    if ($remaining -gt 60) { "$([Math]::Floor($remaining / 60))m $([Math]::Floor($remaining % 60))s" } else { "$([Math]::Floor($remaining))s" }
-                } else { "calculating..." }
-                
-                $progressMessage = "⚡ Processing: $($processedCount)/$($Files.Count) files ($($percent)%) | $($throughput.ToString('F1')) MB/s | ETA: $eta | Errors: $errorCount"
-                Write-Host "`r$progressMessage" -NoNewline -ForegroundColor Green
-                
-                $lastProgressUpdate = Get-Date
-            }
         }
         
-        # Flush log batch periodically
+        # Professional chunk completion summary
+        $chunkElapsed = (Get-Date) - $chunkStartTime
+        $filesPerSecond = if ($chunkElapsed.TotalSeconds -gt 0) { $chunk.Count / $chunkElapsed.TotalSeconds } else { 0 }
+        
+        Write-Host "   ✅ Chunk completed: $chunkSuccessCount success, $chunkErrorCount errors" -ForegroundColor Green
+        Write-Host "   ⏱️  Time: $($chunkElapsed.TotalSeconds.ToString('F1'))s | Rate: $($filesPerSecond.ToString('F1')) files/sec" -ForegroundColor Blue
+        
+        # Enhanced overall progress display (every 5 chunks or at end)
+        if ($chunkNumber % 5 -eq 0 -or $chunkNumber -eq $totalChunks) {
+            $overallPercent = [Math]::Round(($chunkNumber / $totalChunks) * 100, 1)
+            $overallElapsed = (Get-Date) - $stats.StartTime
+            $eta = if ($overallPercent -gt 5) {
+                $totalEstimated = ($overallElapsed.TotalMinutes / $overallPercent) * 100
+                $remaining = $totalEstimated - $overallElapsed.TotalMinutes
+                if ($remaining -gt 60) { 
+                    "$([Math]::Floor($remaining / 60))h $([Math]::Floor($remaining % 60))m" 
+                } else { 
+                    "$([Math]::Floor($remaining))m" 
+                }
+            } else { 
+                "calculating..." 
+            }
+            
+            Write-Host ""
+            Write-Host "📊 Overall Progress: $overallPercent% | ETA: $eta | Errors: $errorCount" -ForegroundColor Magenta
+        }
+        
+        # Flush log batch periodically for data safety
         Clear-HashSmithLogBatch -LogPath $LogPath
         
-        # Add a brief pause between chunks to reduce system load and prevent freezes
+        # Enhanced system load management
         if ($chunkNumber -lt $totalChunks) {
-            $chunkElapsed = (Get-Date) - $chunkStartTime
-            $filesPerSecond = if ($chunkElapsed.TotalSeconds -gt 0) { $chunk.Count / $chunkElapsed.TotalSeconds } else { 0 }
-            
-            # Only show detailed log for first and every 10th chunk to reduce clutter
-            if ($chunkNumber -eq 1 -or $chunkNumber % 10 -eq 0) {
-                Write-HashSmithLog -Message "✅ Chunk $chunkNumber completed in $($chunkElapsed.TotalSeconds.ToString('F1'))s ($($filesPerSecond.ToString('F1')) files/sec)" -Level INFO -Component 'PROCESS'
-                
-                # Show overall progress summary every 10 chunks
-                if ($chunkNumber % 10 -eq 0) {
-                    $overallPercent = [Math]::Round(($chunkNumber / $totalChunks) * 100, 1)
-                    $overallElapsed = (Get-Date) - $stats.StartTime
-                    $eta = if ($overallPercent -gt 0) {
-                        $totalEstimated = ($overallElapsed.TotalMinutes / $overallPercent) * 100
-                        $remaining = $totalEstimated - $overallElapsed.TotalMinutes
-                        if ($remaining -gt 60) { "$([Math]::Floor($remaining / 60))h $([Math]::Floor($remaining % 60))m" } else { "$([Math]::Floor($remaining))m" }
-                    } else { "calculating..." }
-                    Write-HashSmithLog -Message "📊 Overall Progress: $overallPercent% ($chunkNumber/$totalChunks chunks) | ETA: $eta" -Level INFO -Component 'PROCESS'
-                }
-            }
-            
-            # Always show the brief progress update  
-            Write-Host "✅ Chunk $chunkNumber/$totalChunks completed | Rate: $($filesPerSecond.ToString('F1')) files/sec" -ForegroundColor Green
-            Start-Sleep -Milliseconds 750  # Increased pause to prevent system freezes
+            Start-Sleep -Milliseconds 500  # Brief pause between chunks
         }
         
-        # Check if we should stop due to too many errors
+        # Safety check for excessive errors
         if ($errorCount -gt ($Files.Count * 0.5) -and $Files.Count -gt 100) {
             Write-HashSmithLog -Message "Stopping processing due to high error rate: $errorCount errors out of $processedCount files" -Level ERROR -Component 'PROCESS'
             Set-HashSmithExitCode -ExitCode 3
@@ -418,18 +426,22 @@ function Start-HashSmithFileProcessing {
     # Final log batch flush
     Clear-HashSmithLogBatch -LogPath $LogPath
     
-    if ($ShowProgress) {
-        Write-Host "`r$(' ' * 120)`r" -NoNewline  # Clear progress line
-        Write-Host "✅ File processing completed!" -ForegroundColor Green
-    }
+    # Professional completion summary
+    Write-Host ""
+    Write-Host "🎉 File processing completed!" -ForegroundColor Green
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Blue
+    
+    $finalStats = Get-HashSmithStatistics
+    $throughputMBps = if ($finalStats.StartTime) {
+        ($totalBytes / 1MB) / ((Get-Date) - $finalStats.StartTime).TotalSeconds
+    } else { 0 }
     
     Write-HashSmithLog -Message "Enhanced file processing completed" -Level SUCCESS -Component 'PROCESS'
     Write-HashSmithLog -Message "Files processed successfully: $($processedCount - $errorCount)" -Level INFO -Component 'PROCESS'
     Write-HashSmithLog -Message "Files failed: $errorCount" -Level INFO -Component 'PROCESS'
-    $stats = Get-HashSmithStatistics  # Get fresh statistics
-    Write-HashSmithLog -Message "Race conditions detected: $($stats.FilesRaceCondition)" -Level INFO -Component 'PROCESS'
+    Write-HashSmithLog -Message "Race conditions detected: $($finalStats.FilesRaceCondition)" -Level INFO -Component 'PROCESS'
     Write-HashSmithLog -Message "Total bytes processed: $('{0:N2} GB' -f ($totalBytes / 1GB))" -Level INFO -Component 'PROCESS'
-    Write-HashSmithLog -Message "Average throughput: $('{0:N1} MB/s' -f (($totalBytes / 1MB) / ((Get-Date) - $stats.StartTime).TotalSeconds))" -Level INFO -Component 'PROCESS'
+    Write-HashSmithLog -Message "Average throughput: $('{0:N1} MB/s' -f $throughputMBps)" -Level INFO -Component 'PROCESS'
     
     return $fileHashes
 }
