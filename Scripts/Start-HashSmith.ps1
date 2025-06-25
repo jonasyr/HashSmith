@@ -451,7 +451,15 @@ try {
     $largeThroughput = 200MB   # MB/s for large files
     
     # Calculate actual threads used (same logic as processor module)
-    $actualThreads = if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
+    $useParallelForCalculation = if ($UseParallel) { 
+        $true 
+    } elseif ($PSVersionTable.PSVersion.Major -ge 7) { 
+        $true  # Default to parallel on PowerShell 7+
+    } else { 
+        $false 
+    }
+    
+    $actualThreads = if ($useParallelForCalculation -and $PSVersionTable.PSVersion.Major -ge 7) {
         $threads = [Math]::Round([Environment]::ProcessorCount * 0.80)  # Use 80% of cores for optimal performance
         if ($threads -lt 1) { $threads = 1 }
         [Math]::Min($MaxThreads, $threads)
@@ -512,7 +520,15 @@ try {
         $memoryEstimate = 50 + (($totalFiles / 10000) * 2)
         
         # Calculate file distribution for WhatIf using actual threads
-        $actualThreads = if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
+        $useParallelForWhatIf = if ($UseParallel) { 
+            $true 
+        } elseif ($PSVersionTable.PSVersion.Major -ge 7) { 
+            $true  # Default to parallel on PowerShell 7+
+        } else { 
+            $false 
+        }
+        
+        $actualThreadsWhatIf = if ($useParallelForWhatIf -and $PSVersionTable.PSVersion.Major -ge 7) {
             $threads = [Math]::Round([Environment]::ProcessorCount * 0.80)  # Use 80% of cores for optimal performance
             if ($threads -lt 1) { $threads = 1 }
             [Math]::Min($MaxThreads, $threads)
@@ -545,7 +561,7 @@ try {
             Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N1} hours' -f ($estimatedTime / 60))" -Color "Magenta"
         }
         Write-Host "   ⚠️  Time varies significantly by storage & file patterns" -ForegroundColor Gray
-        Write-StatItem -Icon "🧵" -Label "Threads to Use" -Value "$actualThreads (of $MaxThreads max)" -Color "Cyan"
+        Write-StatItem -Icon "🧵" -Label "Threads to Use" -Value "$actualThreadsWhatIf (of $MaxThreads max)" -Color "Cyan"
         Write-StatItem -Icon "🧠" -Label "Est. Memory Usage" -Value "$('{0:N0} MB' -f $memoryEstimate)" -Color "Yellow"
         Write-StatItem -Icon "🔑" -Label "Hash Algorithm" -Value $HashAlgorithm -Color "Blue"
         
