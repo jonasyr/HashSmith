@@ -374,11 +374,16 @@ function Start-HashSmithFileProcessing {
             foreach ($file in $chunk) {
                 $result = Get-HashSmithFileHashSafe -Path $file.FullName -Algorithm $Algorithm -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -VerifyIntegrity:$VerifyIntegrity -StrictMode:$StrictMode -PreIntegritySnapshot $file.IntegritySnapshot
                 
-                # Add additional properties expected by the result processor
+                # Add additional properties expected by the result processor and fix property mapping
                 $result.Path = $file.FullName
                 $result.Size = $file.Length
                 $result.Modified = $file.LastWriteTime
                 $result.IsSymlink = Test-HashSmithSymbolicLink -Path $file.FullName
+                
+                # Map hash function result properties to expected processor properties
+                if (-not $result.ContainsKey('IntegrityVerified')) {
+                    $result.IntegrityVerified = if ($result.ContainsKey('Integrity')) { [bool]$result.Integrity } else { $false }
+                }
                 
                 $chunkResults += $result
             }
