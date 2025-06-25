@@ -598,6 +598,81 @@ function Show-HashSmithSpinnerDemo {
 }
 
 #endregion
+
+#region Enhanced Spinner Functions
+
+<#
+.SYNOPSIS
+    Shows a live spinner with current file being processed (updates same line)
+
+.DESCRIPTION
+    Displays a spinner animation with the current file being processed, updating on the same line
+    to avoid terminal clutter. Designed for use during chunk processing.
+
+.PARAMETER CurrentFile
+    The current file being processed (file name only)
+
+.PARAMETER TotalFiles
+    Total number of files in the current chunk
+
+.PARAMETER ProcessedFiles
+    Number of files already processed in the current chunk
+
+.PARAMETER ChunkInfo
+    Information about the current chunk (e.g., "Chunk 3 of 15")
+
+.EXAMPLE
+    Show-HashSmithFileSpinner -CurrentFile "largefile.zip" -TotalFiles 1000 -ProcessedFiles 250 -ChunkInfo "Chunk 3 of 15"
+#>
+function Show-HashSmithFileSpinner {
+    [CmdletBinding()]
+    param(
+        [string]$CurrentFile = "Processing...",
+        [int]$TotalFiles = 0,
+        [int]$ProcessedFiles = 0,
+        [string]$ChunkInfo = ""
+    )
+    
+    $chars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
+    $char = $chars[(Get-Date).Millisecond % $chars.Length]
+    
+    # Truncate long file names
+    $displayFile = if ($CurrentFile.Length -gt 50) {
+        "..." + $CurrentFile.Substring($CurrentFile.Length - 47)
+    } else {
+        $CurrentFile
+    }
+    
+    # Build progress string
+    $progress = if ($TotalFiles -gt 0) {
+        "($ProcessedFiles/$TotalFiles)"
+    } else {
+        ""
+    }
+    
+    $chunkDisplay = if ($ChunkInfo) { "[$ChunkInfo] " } else { "" }
+    
+    $message = "$char $chunkDisplay$displayFile $progress"
+    
+    # Clear previous line and write new content
+    Write-Host "`r$(' ' * 120)`r$message" -NoNewline -ForegroundColor Yellow
+}
+
+<#
+.SYNOPSIS
+    Clears the file spinner line
+
+.DESCRIPTION
+    Clears the current file spinner line to avoid leaving artifacts
+#>
+function Clear-HashSmithFileSpinner {
+    [CmdletBinding()]
+    param()
+    
+    Write-Host "`r$(' ' * 120)`r" -NoNewline
+}
+
+#endregion
 # Export public functions
 Export-ModuleMember -Function @(
     'Write-HashSmithLog',
@@ -613,5 +688,7 @@ Export-ModuleMember -Function @(
     'Start-HashSmithSpinner',
     'Stop-HashSmithSpinner',
     'Update-HashSmithSpinner',
-    'Show-HashSmithSpinnerDemo'
+    'Show-HashSmithSpinnerDemo',
+    'Show-HashSmithFileSpinner',
+    'Clear-HashSmithFileSpinner'
 )

@@ -145,7 +145,7 @@ function Get-HashSmithFileHashSafe {
             # Compute hash using streaming approach
             $hashAlgorithm = [System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)
             $fileStream = $null
-            $showSpinner = $currentFileInfo.Length -gt (50MB)  # Show spinner for files larger than 50MB
+            $showSpinner = $currentFileInfo.Length -gt (10MB)  # Lower threshold to show spinner sooner
             
             try {
                 # Show spinner for large files using simple approach
@@ -161,17 +161,19 @@ function Get-HashSmithFileHashSafe {
                 # Use FileShare.Read and FileOptions.SequentialScan for better performance and locked file access
                 $fileStream = [System.IO.FileStream]::new($normalizedPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, 4096, [System.IO.FileOptions]::SequentialScan)
                 
-                # Use buffered reading for all files to ensure consistent behavior
-                $buffer = [byte[]]::new($config.BufferSize)
+                # Use smaller buffer for reduced memory pressure and better responsiveness
+                $bufferSize = [Math]::Min($config.BufferSize, 65536)  # Max 64KB buffer
+                $buffer = [byte[]]::new($bufferSize)
                 $totalRead = 0
                 $lastSpinnerUpdate = Get-Date
+                $readOperations = 0
                 
                 # Initialize hash computation
                 if ($currentFileInfo.Length -eq 0) {
                     # Handle zero-byte files explicitly
                     $hashBytes = $hashAlgorithm.ComputeHash([byte[]]::new(0))
                 } else {
-                    # Stream-based hash computation
+                    # Stream-based hash computation with system load reduction
                     while ($totalRead -lt $currentFileInfo.Length) {
                         $bytesRead = $fileStream.Read($buffer, 0, $buffer.Length)
                         if ($bytesRead -eq 0) { break }
@@ -185,6 +187,12 @@ function Get-HashSmithFileHashSafe {
                         }
                         
                         $totalRead += $bytesRead
+                        $readOperations++
+                        
+                        # Add small delay every few operations to reduce system strain
+                        if ($readOperations % 50 -eq 0 -and $currentFileInfo.Length -gt 100MB) {
+                            Start-Sleep -Milliseconds 10
+                        }
                         
                         # Update spinner message for very large files
                         if ($showSpinner -and ((Get-Date) - $lastSpinnerUpdate).TotalSeconds -ge 2) {

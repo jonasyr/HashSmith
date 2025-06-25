@@ -142,7 +142,12 @@ function Start-HashSmithFileProcessing {
         
         # Guard parallel processing behind PowerShell version check
         if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-            # Process chunk with parallel processing (PowerShell 7+) - simplified to avoid stack overflow
+            # Reduce max threads to prevent system overload and freezes
+            $safeThreads = [Math]::Min($MaxThreads, [Math]::Max(2, [Environment]::ProcessorCount / 2))
+            
+            Write-HashSmithLog -Message "Using $safeThreads threads (reduced from $MaxThreads for system stability)" -Level INFO -Component 'PROCESS'
+            
+            # Process chunk with parallel processing (PowerShell 7+) - with reduced load
             $chunkResults = $chunk | ForEach-Object -Parallel {
                 # Import required variables into parallel runspace
                 $Algorithm = $using:Algorithm
@@ -176,6 +181,9 @@ function Start-HashSmithFileProcessing {
                         $result.Hash = [System.BitConverter]::ToString($hashBytes) -replace '-', ''
                         $result.Hash = $result.Hash.ToLower()
                         $result.Success = $true
+                        
+                        # Small delay to reduce system strain
+                        Start-Sleep -Milliseconds 25
                     }
                     finally {
                         if ($hashAlgorithm) { $hashAlgorithm.Dispose() }
@@ -189,11 +197,19 @@ function Start-HashSmithFileProcessing {
                 $result.Duration = (Get-Date) - $startTime
                 return $result
                 
-            } -ThrottleLimit $MaxThreads
+            } -ThrottleLimit $safeThreads
         } else {
             # Process chunk sequentially (PowerShell 5.1 or parallel disabled)
             $chunkResults = @()
+            $chunkFileCount = 0
             foreach ($file in $chunk) {
+                $chunkFileCount++
+                
+                # Show spinner with current file being processed
+                $fileName = Split-Path $file.FullName -Leaf
+                $chunkInfo = "Chunk $chunkNumber of $totalChunks"
+                Show-HashSmithFileSpinner -CurrentFile $fileName -TotalFiles $chunk.Count -ProcessedFiles $chunkFileCount -ChunkInfo $chunkInfo
+                
                 $result = Get-HashSmithFileHashSafe -Path $file.FullName -Algorithm $Algorithm -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -VerifyIntegrity:$VerifyIntegrity -StrictMode:$StrictMode -PreIntegritySnapshot $file.IntegritySnapshot
                 
                 # Add additional properties expected by the result processor and fix property mapping
@@ -208,7 +224,13 @@ function Start-HashSmithFileProcessing {
                 }
                 
                 $chunkResults += $result
+                
+                # Add small delay to reduce system load and prevent freezes
+                Start-Sleep -Milliseconds 50
             }
+            
+            # Clear the spinner line after chunk completion
+            Clear-HashSmithFileSpinner
         }
         
         # Write results and update statistics
@@ -280,6 +302,12 @@ function Start-HashSmithFileProcessing {
         
         # Flush log batch periodically
         Clear-HashSmithLogBatch -LogPath $LogPath
+        
+        # Add a brief pause between chunks to reduce system load
+        if ($chunkNumber -lt $totalChunks) {
+            Write-HashSmithLog -Message "✅ Chunk $chunkNumber completed, pausing briefly to reduce system load..." -Level INFO -Component 'PROCESS'
+            Start-Sleep -Milliseconds 200
+        }
         
         # Check if we should stop due to too many errors
         if ($errorCount -gt ($Files.Count * 0.5) -and $Files.Count -gt 100) {

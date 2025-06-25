@@ -21,7 +21,9 @@
         'Start-HashSmithSpinner',
         'Stop-HashSmithSpinner',
         'Update-HashSmithSpinner',
-        'Show-HashSmithSpinnerDemo'
+        'Show-HashSmithSpinnerDemo',
+        'Show-HashSmithFileSpinner',
+        'Clear-HashSmithFileSpinner'
     )
     VariablesToExport = @()
     CmdletsToExport = @()
