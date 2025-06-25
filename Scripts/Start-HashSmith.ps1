@@ -293,6 +293,9 @@ catch {
 $configOverrides = @{}
 Initialize-HashSmithConfig -ConfigOverrides $configOverrides
 
+# Get configuration for version display
+$config = Get-HashSmithConfig
+
 # Reset statistics for fresh run
 Reset-HashSmithStatistics
 
@@ -312,7 +315,6 @@ Write-Host "██╔══██║██╔══██║╚════█�
 Write-Host "██║  ██║██║  ██║███████║██║  ██║███████║██║ ╚═╝ ██║██║   ██║   ██║  ██║" -ForegroundColor Cyan
 Write-Host "╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝" -ForegroundColor Cyan
 
-$config = Get-HashSmithConfig
 Write-ProfessionalHeader -Title "🔐 Production File Integrity Verification System 🔐" -Subtitle "Version $($config.Version) Enhanced - Enterprise Grade with Professional Output" -Color "Magenta"
 
 # Enhanced system information display
