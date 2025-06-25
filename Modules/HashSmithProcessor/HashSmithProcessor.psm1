@@ -134,6 +134,9 @@ function Start-HashSmithFileProcessing {
         
         Write-HashSmithLog -Message "Processing chunk $chunkNumber of $totalChunks ($($chunk.Count) files)" -Level PROGRESS -Component 'PROCESS'
         
+        # Initialize chunk timing for all processing paths
+        $chunkStartTime = Get-Date
+        
         # Test network connectivity before processing chunk
         if (-not (Test-HashSmithNetworkPath -Path $BasePath -UseCache)) {
             Write-HashSmithLog -Message "Network connectivity lost, aborting chunk processing" -Level ERROR -Component 'PROCESS'
@@ -147,88 +150,118 @@ function Start-HashSmithFileProcessing {
             
             Write-HashSmithLog -Message "Using $safeThreads threads (reduced from $MaxThreads for system stability)" -Level INFO -Component 'PROCESS'
             
-            # Start a background job to show progress during parallel processing
-            $progressJob = Start-Job -ScriptBlock {
-                param($ChunkSize, $TotalFiles, $ChunkNumber, $TotalChunks)
+            # Initialize progress tracking variables
+            $chunkStartTime = Get-Date
+            $completedFiles = 0
+            $totalChunkFiles = $chunk.Count
+            
+            # Process files with parallel jobs and show live progress
+            $chunkResults = $chunk | ForEach-Object -Parallel {
+                # Import required variables into parallel runspace
+                $Algorithm = $using:Algorithm
+                $RetryCount = $using:RetryCount
                 
-                $spinChars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
-                $spinIndex = 0
+                # Process single file with minimal complexity
+                $file = $_
+                $result = @{
+                    Path = $file.FullName
+                    Size = $file.Length
+                    Modified = $file.LastWriteTime
+                    Success = $false
+                    Hash = $null
+                    Error = $null
+                    ErrorCategory = 'Unknown'
+                    Duration = 0
+                    IsSymlink = $false
+                    RaceConditionDetected = $false
+                    IntegrityVerified = $false
+                    Attempts = 1
+                    FileName = $file.Name
+                }
+                
                 $startTime = Get-Date
                 
-                while ($true) {
-                    $char = $spinChars[$spinIndex % $spinChars.Length]
-                    $elapsed = (Get-Date) - $startTime
-                    $elapsedStr = if ($elapsed.TotalMinutes -gt 1) { "$([Math]::Floor($elapsed.TotalMinutes))m $([Math]::Floor($elapsed.Seconds))s" } else { "$([Math]::Floor($elapsed.TotalSeconds))s" }
-                    
-                    $progressMsg = "$char Processing chunk $ChunkNumber of $TotalChunks ($ChunkSize files) - $elapsedStr elapsed"
-                    Write-Host "`r$progressMsg" -NoNewline -ForegroundColor Yellow
-                    
-                    Start-Sleep -Milliseconds 150
-                    $spinIndex++
-                }
-            } -ArgumentList $chunk.Count, $Files.Count, $chunkNumber, $totalChunks
-            
-            try {
-                # Process chunk with parallel processing (PowerShell 7+) - with reduced load
-                $chunkResults = $chunk | ForEach-Object -Parallel {
-                    # Import required variables into parallel runspace
-                    $Algorithm = $using:Algorithm
-                    $RetryCount = $using:RetryCount
-                    
-                    # Process single file with minimal complexity
-                    $file = $_
-                    $result = @{
-                        Path = $file.FullName
-                        Size = $file.Length
-                        Modified = $file.LastWriteTime
-                        Success = $false
-                        Hash = $null
-                        Error = $null
-                        ErrorCategory = 'Unknown'
-                        Duration = 0
-                        IsSymlink = $false
-                        RaceConditionDetected = $false
-                        IntegrityVerified = $false
-                        Attempts = 1
-                    }
-                    
-                    $startTime = Get-Date
-                    
+                try {
+                    # Simple hash computation without complex retry logic
+                    $hashAlgorithm = [System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)
                     try {
-                        # Simple hash computation without complex retry logic
-                        $hashAlgorithm = [System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)
-                        try {
-                            $fileBytes = [System.IO.File]::ReadAllBytes($file.FullName)
-                            $hashBytes = $hashAlgorithm.ComputeHash($fileBytes)
-                            $result.Hash = [System.BitConverter]::ToString($hashBytes) -replace '-', ''
-                            $result.Hash = $result.Hash.ToLower()
-                            $result.Success = $true
-                            
-                            # Small delay to reduce system strain and prevent freezes
-                            Start-Sleep -Milliseconds 75
-                        }
-                        finally {
-                            if ($hashAlgorithm) { $hashAlgorithm.Dispose() }
-                        }
+                        $fileBytes = [System.IO.File]::ReadAllBytes($file.FullName)
+                        $hashBytes = $hashAlgorithm.ComputeHash($fileBytes)
+                        $result.Hash = [System.BitConverter]::ToString($hashBytes) -replace '-', ''
+                        $result.Hash = $result.Hash.ToLower()
+                        $result.Success = $true
+                        
+                        # Small delay to reduce system strain and prevent freezes
+                        Start-Sleep -Milliseconds 75
                     }
-                    catch {
-                        $result.Error = $_.Exception.Message
-                        $result.ErrorCategory = 'ProcessingError'
+                    finally {
+                        if ($hashAlgorithm) { $hashAlgorithm.Dispose() }
                     }
-                    
-                    $result.Duration = (Get-Date) - $startTime
-                    return $result
-                    
-                } -ThrottleLimit $safeThreads
-            }
-            finally {
-                # Stop the progress job and clean up the line
-                if ($progressJob) {
-                    Stop-Job $progressJob -ErrorAction SilentlyContinue
-                    Remove-Job $progressJob -Force -ErrorAction SilentlyContinue
                 }
-                Write-Host "`r$(' ' * 80)`r" -NoNewline  # Clear the progress line
+                catch {
+                    $result.Error = $_.Exception.Message
+                    $result.ErrorCategory = 'ProcessingError'
+                }
+                
+                $result.Duration = (Get-Date) - $startTime
+                return $result
+                
+            } -ThrottleLimit $safeThreads -AsJob
+            
+            # Show real-time progress while jobs are running
+            $spinChars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
+            $spinIndex = 0
+            $lastProgressTime = Get-Date
+            
+            # Monitor the parallel jobs and show progress
+            while ($chunkResults.State -eq 'Running') {
+                $char = $spinChars[$spinIndex % $spinChars.Length]
+                $elapsed = (Get-Date) - $chunkStartTime
+                $elapsedStr = if ($elapsed.TotalMinutes -gt 1) { 
+                    "$([Math]::Floor($elapsed.TotalMinutes))m $([Math]::Floor($elapsed.Seconds))s" 
+                } else { 
+                    "$([Math]::Floor($elapsed.TotalSeconds))s" 
+                }
+                
+                # Try to estimate progress by checking completed results
+                $currentResults = @()
+                try {
+                    $currentResults = @(Receive-Job $chunkResults -Keep -ErrorAction SilentlyContinue)
+                } catch {
+                    # Ignore errors when checking job progress
+                }
+                
+                $completedCount = $currentResults.Count
+                $progressPercent = if ($totalChunkFiles -gt 0) { 
+                    [Math]::Round(($completedCount / $totalChunkFiles) * 100, 1) 
+                } else { 0 }
+                
+                $progressMsg = "$char Processing chunk $chunkNumber of $totalChunks | Files: $completedCount/$totalChunkFiles ($progressPercent%) | $elapsedStr elapsed"
+                Write-Host "`r$progressMsg" -NoNewline -ForegroundColor Yellow
+                
+                Start-Sleep -Milliseconds 200
+                $spinIndex++
+                
+                # Prevent infinite loop - timeout after 10 minutes per chunk
+                if ($elapsed.TotalMinutes -gt 10) {
+                    Write-Host "`r⚠️ Chunk processing timeout, stopping..." -ForegroundColor Red
+                    Stop-Job $chunkResults -ErrorAction SilentlyContinue
+                    break
+                }
             }
+            
+            # Get the final results
+            try {
+                $chunkResults = Receive-Job $chunkResults -Wait -ErrorAction Stop
+                Remove-Job $chunkResults -Force -ErrorAction SilentlyContinue
+            }
+            catch {
+                Write-HashSmithLog -Message "Error retrieving parallel job results: $($_.Exception.Message)" -Level ERROR -Component 'PROCESS'
+                $chunkResults = @()
+            }
+            
+            # Clear the progress line
+            Write-Host "`r$(' ' * 100)`r" -NoNewline
         } else {
             # Process chunk sequentially (PowerShell 5.1 or parallel disabled)
             $chunkResults = @()
@@ -336,8 +369,12 @@ function Start-HashSmithFileProcessing {
         
         # Add a brief pause between chunks to reduce system load and prevent freezes
         if ($chunkNumber -lt $totalChunks) {
-            Write-HashSmithLog -Message "✅ Chunk $chunkNumber completed, pausing to reduce system load..." -Level INFO -Component 'PROCESS'
-            Start-Sleep -Milliseconds 500  # Increased pause to prevent system freezes
+            $chunkElapsed = (Get-Date) - $chunkStartTime
+            $filesPerSecond = if ($chunkElapsed.TotalSeconds -gt 0) { $chunk.Count / $chunkElapsed.TotalSeconds } else { 0 }
+            
+            Write-HashSmithLog -Message "✅ Chunk $chunkNumber completed in $($chunkElapsed.TotalSeconds.ToString('F1'))s ($($filesPerSecond.ToString('F1')) files/sec)" -Level INFO -Component 'PROCESS'
+            Write-Host "✅ Chunk $chunkNumber/$totalChunks completed | Rate: $($filesPerSecond.ToString('F1')) files/sec | Pausing to reduce system load..." -ForegroundColor Green
+            Start-Sleep -Milliseconds 750  # Increased pause to prevent system freezes
         }
         
         # Check if we should stop due to too many errors
