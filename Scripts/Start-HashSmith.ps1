@@ -212,32 +212,24 @@ Reset-HashSmithStatistics
 # Initialize
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
-# Display enhanced startup banner
+# Display startup banner
 Write-Host ""
-Write-Host "██╗  ██╗ █████╗ ███████╗██╗  ██╗███████╗███╗   ███╗██╗████████╗██╗  ██╗" -ForegroundColor Magenta
-Write-Host "██║  ██║██╔══██╗██╔════╝██║  ██║██╔════╝████╗ ████║██║╚══██╔══╝██║  ██║" -ForegroundColor Magenta
+Write-Host "██╗  ██╗ █████╗ ███████╗██╗  ██╗███████╗███╗   ███╗██╗████████╗██╗  ██╗" -ForegroundColor Cyan
+Write-Host "██║  ██║██╔══██╗██╔════╝██║  ██║██╔════╝████╗ ████║██║╚══██╔══╝██║  ██║" -ForegroundColor Cyan
 Write-Host "███████║███████║███████╗███████║███████╗██╔████╔██║██║   ██║   ███████║" -ForegroundColor Cyan
 Write-Host "██╔══██║██╔══██║╚════██║██╔══██║╚════██║██║╚██╔╝██║██║   ██║   ██╔══██║" -ForegroundColor Cyan
-Write-Host "██║  ██║██║  ██║███████║██║  ██║███████║██║ ╚═╝ ██║██║   ██║   ██║  ██║" -ForegroundColor Blue
-Write-Host "╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝" -ForegroundColor Blue
+Write-Host "██║  ██║██║  ██║███████║██║  ██║███████║██║ ╚═╝ ██║██║   ██║   ██║  ██║" -ForegroundColor Cyan
+Write-Host "╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝" -ForegroundColor Cyan
 Write-Host ""
 
 $config = Get-HashSmithConfig
-Write-Host "            🔐 Production File Integrity Verification System 🔐" -ForegroundColor Yellow -BackgroundColor DarkBlue
-Write-Host "            Version $($config.Version) - Enhanced Enterprise Grade" -ForegroundColor White -BackgroundColor DarkGreen
-Write-Host "              🛡️  Race Condition Protection • Symbolic Link Support 🛡️ " -ForegroundColor Cyan -BackgroundColor DarkMagenta
+Write-Host "            🔐 Production File Integrity Verification System 🔐" -ForegroundColor Yellow
+Write-Host "            Version $($config.Version) - Enhanced Enterprise Grade" -ForegroundColor Green
+Write-Host "              🛡️  Race Condition Protection • Symbolic Link Support 🛡️ " -ForegroundColor Magenta
 Write-Host ""
 
-# Enhanced system info
-Write-Host "🖥️  " -NoNewline -ForegroundColor Yellow
-Write-Host "System: " -NoNewline -ForegroundColor Cyan
-Write-Host "$($env:COMPUTERNAME)" -NoNewline -ForegroundColor White
-Write-Host " | PowerShell: " -NoNewline -ForegroundColor Cyan  
-Write-Host "$($PSVersionTable.PSVersion)" -NoNewline -ForegroundColor White
-Write-Host " | CPU Cores: " -NoNewline -ForegroundColor Cyan
-Write-Host "$([Environment]::ProcessorCount)" -NoNewline -ForegroundColor White
-Write-Host " | Memory: " -NoNewline -ForegroundColor Cyan
-Write-Host "$('{0:N1} GB' -f ((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB))" -ForegroundColor White
+# System info
+Write-Host "🖥️  System: $($env:COMPUTERNAME) | PowerShell: $($PSVersionTable.PSVersion) | CPU Cores: $([Environment]::ProcessorCount) | Memory: $('{0:N1} GB' -f ((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB))" -ForegroundColor White
 Write-Host ""
 
 try {
@@ -255,10 +247,10 @@ try {
     
     # Display enhanced configuration
     Write-Host ""
-    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Magenta -BackgroundColor Black
-    Write-Host "║                   🔐 Enhanced HashSmith v$($config.Version) 🔐                     ║" -ForegroundColor White -BackgroundColor Magenta
-    Write-Host "║              ⚡ Bulletproof File Integrity with Race Protection ⚡           ║" -ForegroundColor Yellow -BackgroundColor Blue
-    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta -BackgroundColor Black
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Magenta
+    Write-Host "║                   🔐 Enhanced HashSmith v$($config.Version) 🔐                     ║" -ForegroundColor Magenta
+    Write-Host "║              ⚡ Bulletproof File Integrity with Race Protection ⚡           ║" -ForegroundColor Yellow
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
     Write-Host ""
     
     # Enhanced configuration display
@@ -276,9 +268,12 @@ try {
     )
     
     foreach ($item in $configItems) {
-        Write-Host "$($item.Icon) " -NoNewline -ForegroundColor Yellow
-        Write-Host "$($item.Label): " -NoNewline -ForegroundColor Cyan
-        Write-Host "$($item.Value)" -ForegroundColor $(if($item.Value -is [bool]){$(if($item.Value){"Black"}else{"White"})}else{"White"}) -BackgroundColor $item.Color
+        $colorName = if ($item.Value -is [bool]) { 
+            if ($item.Value) { "Green" } else { "Red" } 
+        } else { 
+            "White" 
+        }
+        Write-Host "$($item.Icon) $($item.Label): $($item.Value)" -ForegroundColor $colorName
     }
     
     Write-Host ""
@@ -338,19 +333,14 @@ try {
     $allFiles = $discoveryResult.Files
     $discoveryStats = $discoveryResult.Statistics
     
-    # Display discovery results prominently
+    # Display discovery results
     Write-Host ""
-    Write-Host "✅ " -NoNewline -ForegroundColor Green
-    Write-Host "File Discovery Complete" -BackgroundColor DarkGreen -ForegroundColor White
-    Write-Host "   📁 Files found: " -NoNewline -ForegroundColor Cyan
-    Write-Host "$($allFiles.Count)" -ForegroundColor White -BackgroundColor DarkCyan
-    Write-Host "   ⏭️  Files skipped: " -NoNewline -ForegroundColor Yellow
-    Write-Host "$($discoveryStats.TotalSkipped)" -ForegroundColor Black -BackgroundColor Yellow
-    Write-Host "   🔗 Symbolic links: " -NoNewline -ForegroundColor Magenta
-    Write-Host "$($discoveryStats.TotalSymlinks)" -ForegroundColor White -BackgroundColor DarkMagenta
+    Write-Host "✅ File Discovery Complete" -ForegroundColor Green
+    Write-Host "   📁 Files found: $($allFiles.Count)" -ForegroundColor Cyan
+    Write-Host "   ⏭️  Files skipped: $($discoveryStats.TotalSkipped)" -ForegroundColor Yellow
+    Write-Host "   🔗 Symbolic links: $($discoveryStats.TotalSymlinks)" -ForegroundColor Magenta
     if ($discoveryResult.Errors.Count -gt 0) {
-        Write-Host "   ⚠️  Discovery errors: " -NoNewline -ForegroundColor Red
-        Write-Host "$($discoveryResult.Errors.Count)" -ForegroundColor White -BackgroundColor Red
+        Write-Host "   ⚠️  Discovery errors: $($discoveryResult.Errors.Count)" -ForegroundColor Red
     }
     Write-Host ""
     
@@ -402,28 +392,20 @@ try {
     # WhatIf mode with enhanced details
     if ($WhatIfPreference) {
         Write-Host ""
-        Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow -BackgroundColor Black
-        Write-Host "║                          🔮 WHAT-IF MODE RESULTS 🔮                        ║" -ForegroundColor Black -BackgroundColor Yellow
-        Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow -BackgroundColor Black
+        Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
+        Write-Host "║                          🔮 WHAT-IF MODE RESULTS 🔮                        ║" -ForegroundColor Yellow
+        Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
         Write-Host ""
         
         $estimatedTime = ($totalSize / 200MB) / 60
         $memoryEstimate = 50 + (($totalFiles / 10000) * 2)
         
-        $whatIfItems = @(
-            @{ Icon = "[CNT]"; Label = "Files to process"; Value = "$totalFiles"; Color = "DarkBlue" }
-            @{ Icon = "[SIZ]"; Label = "Total size"; Value = "$('{0:N2} GB' -f ($totalSize / 1GB))"; Color = "DarkGreen" }
-            @{ Icon = "[TIM]"; Label = "Estimated time"; Value = "$('{0:N1} minutes' -f $estimatedTime)"; Color = "DarkMagenta" }
-            @{ Icon = "[THR]"; Label = "Threads to use"; Value = "$MaxThreads"; Color = "Cyan" }
-            @{ Icon = "[MEM]"; Label = "Estimated memory"; Value = "$('{0:N0} MB' -f $memoryEstimate)"; Color = "DarkYellow" }
-            @{ Icon = "[ALG]"; Label = "Hash algorithm"; Value = "$HashAlgorithm"; Color = "Yellow" }
-        )
-        
-        foreach ($item in $whatIfItems) {
-            Write-Host "$($item.Icon) " -NoNewline -ForegroundColor Yellow
-            Write-Host "$($item.Label): " -NoNewline -ForegroundColor Cyan
-            Write-Host "$($item.Value)" -ForegroundColor White -BackgroundColor $item.Color
-        }
+        Write-Host "[CNT] Files to process: $totalFiles" -ForegroundColor Cyan
+        Write-Host "[SIZ] Total size: $('{0:N2} GB' -f ($totalSize / 1GB))" -ForegroundColor Green
+        Write-Host "[TIM] Estimated time: $('{0:N1} minutes' -f $estimatedTime)" -ForegroundColor Magenta
+        Write-Host "[THR] Threads to use: $MaxThreads" -ForegroundColor Cyan
+        Write-Host "[MEM] Estimated memory: $('{0:N0} MB' -f $memoryEstimate)" -ForegroundColor Yellow
+        Write-Host "[ALG] Hash algorithm: $HashAlgorithm" -ForegroundColor Yellow
         
         Write-Host ""
         Write-Host "🛡️  Enhanced protections enabled:" -ForegroundColor Green
@@ -553,64 +535,42 @@ try {
         Write-HashSmithLog -Message "Enhanced JSON log written: $jsonPath" -Level SUCCESS
     }
     
-    # Enhanced final summary with comprehensive statistics
+    # Final summary with clean formatting
     Write-Host ""
-    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Green -BackgroundColor Black
-    Write-Host "║                          🎉 OPERATION COMPLETE 🎉                           ║" -ForegroundColor Black -BackgroundColor Green
-    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Green -BackgroundColor Black
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Green
+    Write-Host "║                          🎉 OPERATION COMPLETE 🎉                           ║" -ForegroundColor Green
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Green
     Write-Host ""
     
-    # Enhanced statistics with visual formatting
-    Write-Host "📊 " -NoNewline -ForegroundColor Yellow
-    Write-Host "COMPREHENSIVE PROCESSING STATISTICS" -ForegroundColor White -BackgroundColor DarkBlue
+    # Statistics with clean formatting
+    Write-Host "📊 COMPREHENSIVE PROCESSING STATISTICS" -ForegroundColor Yellow
     Write-Host "─" * 50 -ForegroundColor Blue
     
-    Write-Host "🔍 Files discovered: " -NoNewline -ForegroundColor Cyan
-    Write-Host "$($stats.FilesDiscovered)" -ForegroundColor White -BackgroundColor DarkCyan
-    
-    Write-Host "✅ Files processed: " -NoNewline -ForegroundColor Green
-    Write-Host "$($stats.FilesProcessed)" -ForegroundColor Black -BackgroundColor Green
-    
-    Write-Host "⏭️  Files skipped: " -NoNewline -ForegroundColor Yellow
-    Write-Host "$($stats.FilesSkipped)" -ForegroundColor Black -BackgroundColor Yellow
-    
-    Write-Host "❌ Files failed: " -NoNewline -ForegroundColor Red
-    Write-Host "$($stats.FilesError)" -ForegroundColor White -BackgroundColor $(if($stats.FilesError -eq 0){'Green'}else{'Red'})
-    
-    Write-Host "💾 Total data processed: " -NoNewline -ForegroundColor Magenta
-    Write-Host "$('{0:N2} GB' -f ($stats.BytesProcessed / 1GB))" -ForegroundColor White -BackgroundColor DarkMagenta
-    
-    Write-Host "⏱️  Processing time: " -NoNewline -ForegroundColor Blue
-    Write-Host "$($stopwatch.Elapsed.ToString('hh\:mm\:ss'))" -ForegroundColor White -BackgroundColor Blue
-    
-    Write-Host "🚀 Average throughput: " -NoNewline -ForegroundColor Cyan
-    Write-Host "$('{0:N1} MB/s' -f (($stats.BytesProcessed / 1MB) / $stopwatch.Elapsed.TotalSeconds))" -ForegroundColor Black -BackgroundColor Cyan
+    Write-Host "🔍 Files discovered: $($stats.FilesDiscovered)" -ForegroundColor Cyan
+    Write-Host "✅ Files processed: $($stats.FilesProcessed)" -ForegroundColor Green
+    Write-Host "⏭️  Files skipped: $($stats.FilesSkipped)" -ForegroundColor Yellow
+    Write-Host "❌ Files failed: $($stats.FilesError)" -ForegroundColor $(if($stats.FilesError -eq 0){'Green'}else{'Red'})
+    Write-Host "💾 Total data processed: $('{0:N2} GB' -f ($stats.BytesProcessed / 1GB))" -ForegroundColor Magenta
+    Write-Host "⏱️  Processing time: $($stopwatch.Elapsed.ToString('hh\:mm\:ss'))" -ForegroundColor Blue
+    Write-Host "🚀 Average throughput: $('{0:N1} MB/s' -f (($stats.BytesProcessed / 1MB) / $stopwatch.Elapsed.TotalSeconds))" -ForegroundColor Cyan
     
     Write-Host ""
-    Write-Host "📁 " -NoNewline -ForegroundColor Yellow
-    Write-Host "Log file: " -NoNewline -ForegroundColor White
-    Write-Host "$LogFile" -ForegroundColor Green
+    Write-Host "📁 Log file: $LogFile" -ForegroundColor White
     
     if ($UseJsonLog) {
-        Write-Host "📊 " -NoNewline -ForegroundColor Yellow
-        Write-Host "JSON log: " -NoNewline -ForegroundColor White
-        Write-Host "$([System.IO.Path]::ChangeExtension($LogFile, '.json'))" -ForegroundColor Green
+        Write-Host "📊 JSON log: $([System.IO.Path]::ChangeExtension($LogFile, '.json'))" -ForegroundColor Green
     }
     
     Write-Host ""
     
-    # Set exit code with visual feedback
+    # Set exit code with clean feedback
     if ($stats.FilesError -gt 0) {
-        Write-Host "⚠️  " -NoNewline -ForegroundColor Yellow
-        Write-Host "COMPLETED WITH WARNINGS" -ForegroundColor Black -BackgroundColor Yellow
+        Write-Host "⚠️  COMPLETED WITH WARNINGS" -ForegroundColor Yellow
         Write-Host "   • $($stats.FilesError) files failed processing" -ForegroundColor Red
-        Write-Host "   • Use " -NoNewline -ForegroundColor White
-        Write-Host "-FixErrors" -NoNewline -ForegroundColor Yellow -BackgroundColor DarkRed
-        Write-Host " to retry failed files" -ForegroundColor White
+        Write-Host "   • Use -FixErrors to retry failed files" -ForegroundColor White
         Set-HashSmithExitCode -ExitCode 1
     } else {
-        Write-Host "🎉 " -NoNewline -ForegroundColor Green
-        Write-Host "SUCCESS - ALL FILES PROCESSED" -ForegroundColor Black -BackgroundColor Green
+        Write-Host "🎉 SUCCESS - ALL FILES PROCESSED" -ForegroundColor Green
         Write-Host "   • Zero errors detected" -ForegroundColor Green
         Write-Host "   • File integrity verification complete" -ForegroundColor Green
     }
