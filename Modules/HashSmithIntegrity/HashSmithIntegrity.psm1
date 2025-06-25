@@ -58,59 +58,29 @@ function Get-HashSmithDirectoryIntegrityHash {
     }
     
     try {
-        # Create deterministic input by sorting files with enhanced criteria
-        $sortedEntries = @()
+        # Create standard directory hash compatible with other MD5 tools
+        # Simply concatenate all individual file hashes in sorted filename order
         $fileCount = 0
         $totalSize = 0
+        $sortedHashes = @()
         
-        # Sort by normalized relative path and then by file size for determinism
+        # Sort files by filename only (standard approach)
         $sortedPaths = $FileHashes.Keys | Sort-Object { 
-            $relativePath = $_
-            if ($BasePath -and $_.StartsWith($BasePath)) {
-                $relativePath = $_.Substring($BasePath.Length).TrimStart('\', '/')
-            }
-            $relativePath.ToLowerInvariant().Replace('\', '/')
-        } | Sort-Object { $FileHashes[$_].Size }
+            [System.IO.Path]::GetFileName($_).ToLowerInvariant()
+        }
         
         foreach ($filePath in $sortedPaths) {
-            $relativePath = $filePath
-            if ($BasePath -and $filePath.StartsWith($BasePath)) {
-                $relativePath = $filePath.Substring($BasePath.Length).TrimStart('\', '/')
-            }
-            
-            # Normalize path separators for cross-platform determinism
-            $normalizedRelativePath = $relativePath.Replace('\', '/')
-            
-            # Format: normalizedpath|hash|size|flags
-            $flags = @()
-            if ($FileHashes[$filePath].IsSymlink) { $flags += 'S' }
-            if ($FileHashes[$filePath].RaceConditionDetected) { $flags += 'R' }
-            if ($FileHashes[$filePath].IntegrityVerified) { $flags += 'I' }
-            $flagString = $flags -join ','
-            
-            $entry = "$normalizedRelativePath|$($FileHashes[$filePath].Hash)|$($FileHashes[$filePath].Size)|$flagString"
-            $sortedEntries += $entry
+            $hash = $FileHashes[$filePath].Hash
+            $sortedHashes += $hash
             $fileCount++
             $totalSize += $FileHashes[$filePath].Size
         }
         
-        $config = Get-HashSmithConfig
-        
-        # Add metadata for additional integrity verification
-        $metadata = @(
-            "METADATA|FileCount:$fileCount",
-            "METADATA|TotalSize:$totalSize",
-            "METADATA|Algorithm:$Algorithm",
-            "METADATA|Version:$($config.Version)",
-            "METADATA|Timestamp:$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ss.fffZ')"
-        )
-        
-        # Combine all entries
-        $allEntries = $sortedEntries + $metadata
-        $combinedInput = $allEntries -join "`n"
+        # Standard approach: concatenate all hashes without separators
+        $combinedInput = $sortedHashes -join ""
         
         if ($StrictMode) {
-            Write-HashSmithLog -Message "Directory hash input preview (first 500 chars): $($combinedInput.Substring(0, [Math]::Min(500, $combinedInput.Length)))" -Level DEBUG -Component 'INTEGRITY'
+            Write-HashSmithLog -Message "Directory hash input (concatenated hashes): $($combinedInput.Substring(0, [Math]::Min(200, $combinedInput.Length)))..." -Level DEBUG -Component 'INTEGRITY'
         }
         
         # Create combined input bytes with explicit encoding
@@ -122,8 +92,8 @@ function Get-HashSmithDirectoryIntegrityHash {
         $directoryHash = [System.BitConverter]::ToString($hashBytes) -replace '-', ''
         $hashAlgorithm.Dispose()
         
-        Write-HashSmithLog -Message "Directory integrity hash computed: $($directoryHash.ToLower())" -Level SUCCESS -Component 'INTEGRITY'
-        Write-HashSmithLog -Message "Hash includes $fileCount files, $($totalSize) bytes total" -Level INFO -Component 'INTEGRITY'
+        Write-HashSmithLog -Message "Standard directory hash computed: $($directoryHash.ToLower())" -Level SUCCESS -Component 'INTEGRITY'
+        Write-HashSmithLog -Message "Hash includes $fileCount files, $($totalSize) bytes total (compatible with standard MD5 tools)" -Level INFO -Component 'INTEGRITY'
         
         return @{
             Hash = $directoryHash.ToLower()
@@ -131,9 +101,9 @@ function Get-HashSmithDirectoryIntegrityHash {
             TotalSize = $totalSize
             Algorithm = $Algorithm
             Metadata = @{
-                SortedEntries = $sortedEntries.Count
-                MetadataEntries = $metadata.Count
+                SortedHashes = $sortedHashes.Count
                 InputSize = $inputBytes.Length
+                Method = "Standard concatenated hash"
                 Timestamp = Get-Date
             }
         }
