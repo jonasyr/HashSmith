@@ -534,10 +534,18 @@ try {
         
         $filterTime = (Get-Date) - $filterStart
         Write-Host "`r   ✅ Resume filtering complete in $($filterTime.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
-        Write-Host "   📊 Skipped: $skippedResumeCount already processed" -ForegroundColor Green
-        Write-Host "   📊 Remaining: $($filesToProcess.Count) files to process" -ForegroundColor Cyan
+        Write-Host "   📊 Files discovered: $($allFiles.Count)" -ForegroundColor Gray
+        Write-Host "   📊 Files in log: $($existingEntries.Processed.Count)" -ForegroundColor Gray
+        Write-Host "   📊 Skipped (already processed): $skippedResumeCount" -ForegroundColor Green
+        Write-Host "   📊 Remaining to process: $($filesToProcess.Count)" -ForegroundColor Cyan
         
-        Write-HashSmithLog -Message "RESUME: Skipped $skippedResumeCount already processed files, $($filesToProcess.Count) remaining" -Level SUCCESS -Component 'RESUME'
+        # Report any discrepancy
+        if ($skippedResumeCount -ne $allFiles.Count -and $filesToProcess.Count -eq 0) {
+            $missingFromLog = $allFiles.Count - $skippedResumeCount
+            Write-Host "   ⚠️  Note: $missingFromLog files discovered but not found in log (may be new/renamed files)" -ForegroundColor Yellow
+        }
+        
+        Write-HashSmithLog -Message "RESUME: Discovered $($allFiles.Count) files, skipped $skippedResumeCount already processed, $($filesToProcess.Count) remaining" -Level SUCCESS -Component 'RESUME'
         
     } else {
         # Process all discovered files
@@ -547,7 +555,62 @@ try {
     
     if ($filesToProcess.Count -eq 0) {
         Write-Host ""
-        Write-Host "🎉 All files already processed - nothing to do!" -ForegroundColor Green
+        Write-Host "🎉 All files already processed!" -ForegroundColor Green
+        
+        # Check if directory integrity hash needs to be computed
+        if (-not $FixErrors -and $Resume) {
+            Write-Host "🔍 Checking if directory integrity hash needs computation..." -ForegroundColor Cyan
+            
+            # Build complete file hash collection from existing entries
+            $allFileHashes = @{}
+            foreach ($processedFile in $existingEntries.Processed.Keys) {
+                $absolutePath = if ([System.IO.Path]::IsPathRooted($processedFile)) { 
+                    $processedFile 
+                } else { 
+                    Join-Path $SourceDir $processedFile 
+                }
+                
+                $entry = $existingEntries.Processed[$processedFile]
+                $allFileHashes[$absolutePath] = @{
+                    Hash = $entry.Hash
+                    Size = $entry.Size
+                    IsSymlink = if ($entry.ContainsKey('IsSymlink')) { $entry.IsSymlink } else { $false }
+                    RaceConditionDetected = if ($entry.ContainsKey('RaceConditionDetected')) { $entry.RaceConditionDetected } else { $false }
+                    IntegrityVerified = if ($entry.ContainsKey('IntegrityVerified')) { $entry.IntegrityVerified } else { $false }
+                }
+            }
+            
+            # Check if directory integrity hash already exists in log
+            $logContent = Get-Content $LogFile -Raw -ErrorAction SilentlyContinue
+            $hasDirectoryHash = $logContent -and $logContent.Contains("Total$($HashAlgorithm) =")
+            
+            if (-not $hasDirectoryHash -and $allFileHashes.Count -gt 0) {
+                Write-Host "🔐 Computing missing directory integrity hash..." -ForegroundColor Yellow
+                $directoryHashResult = Get-HashSmithDirectoryIntegrityHash -FileHashes $allFileHashes -Algorithm $HashAlgorithm -BasePath $SourceDir -StrictMode:$StrictMode
+                
+                if ($directoryHashResult) {
+                    $totalBytes = $directoryHashResult.TotalSize
+                    $totalGB = $totalBytes / 1GB
+                    
+                    $summaryInfo = @(
+                        "",
+                        "Total$($HashAlgorithm) = $($directoryHashResult.Hash)",
+                        "$($directoryHashResult.FileCount) files checked ($($totalBytes) bytes, $($totalGB.ToString('F2')) GB)."
+                    )
+                    
+                    $summaryInfo | Add-Content -Path $LogFile -Encoding UTF8
+                    Write-Host "✅ Directory integrity hash computed: $($directoryHashResult.Hash)" -ForegroundColor Green
+                    Write-HashSmithLog -Message "DIRECTORY: Computed missing integrity hash: $($directoryHashResult.Hash)" -Level SUCCESS -Component 'INTEGRITY'
+                } else {
+                    Write-Host "⚠️  Failed to compute directory integrity hash" -ForegroundColor Yellow
+                }
+            } elseif ($hasDirectoryHash) {
+                Write-Host "✅ Directory integrity hash already exists in log" -ForegroundColor Green
+            } else {
+                Write-Host "⚠️  No processed files found for directory hash computation" -ForegroundColor Yellow
+            }
+        }
+        
         Write-Host "   Use -FixErrors to retry failed files if needed" -ForegroundColor Gray
         exit 0
     }
@@ -669,55 +732,76 @@ try {
     }
     
     # Directory integrity hash computation
-    if (-not $FixErrors -and $actualFileHashes.Count -gt 0) {
-        Write-Host ""
-        Write-Host "🔐 Computing directory integrity hash..." -ForegroundColor Cyan
+    # Compute when we have new files OR when resuming and directory hash might be missing
+    $shouldComputeDirectoryHash = -not $FixErrors -and (
+        $actualFileHashes.Count -gt 0 -or 
+        ($Resume -and $existingEntries.Processed.Count -gt 0)
+    )
+    
+    if ($shouldComputeDirectoryHash) {
+        # Check if directory hash already exists (to avoid duplicate computation)
+        $logContent = Get-Content $LogFile -Raw -ErrorAction SilentlyContinue
+        $hasDirectoryHash = $logContent -and $logContent.Contains("Total$($HashAlgorithm) =")
         
-        # Include existing processed files for complete directory hash
-        $allFileHashes = @{}
-        
-        # Add newly processed files
-        foreach ($key in $actualFileHashes.Keys) {
-            $allFileHashes[$key] = $actualFileHashes[$key]
-        }
-        
-        # Add existing processed files
-        foreach ($processedFile in $existingEntries.Processed.Keys) {
-            $absolutePath = if ([System.IO.Path]::IsPathRooted($processedFile)) { 
-                $processedFile 
-            } else { 
-                Join-Path $SourceDir $processedFile 
+        if (-not $hasDirectoryHash) {
+            Write-Host ""
+            Write-Host "🔐 Computing directory integrity hash..." -ForegroundColor Cyan
+            
+            # Include existing processed files for complete directory hash
+            $allFileHashes = @{}
+            
+            # Add newly processed files
+            foreach ($key in $actualFileHashes.Keys) {
+                $allFileHashes[$key] = $actualFileHashes[$key]
             }
             
-            if (-not $allFileHashes.ContainsKey($absolutePath)) {
-                $entry = $existingEntries.Processed[$processedFile]
-                $allFileHashes[$absolutePath] = @{
-                    Hash = $entry.Hash
-                    Size = $entry.Size
-                    IsSymlink = if ($entry.ContainsKey('IsSymlink')) { $entry.IsSymlink } else { $false }
-                    RaceConditionDetected = if ($entry.ContainsKey('RaceConditionDetected')) { $entry.RaceConditionDetected } else { $false }
-                    IntegrityVerified = if ($entry.ContainsKey('IntegrityVerified')) { $entry.IntegrityVerified } else { $false }
+            # Add existing processed files
+            foreach ($processedFile in $existingEntries.Processed.Keys) {
+                $absolutePath = if ([System.IO.Path]::IsPathRooted($processedFile)) { 
+                    $processedFile 
+                } else { 
+                    Join-Path $SourceDir $processedFile 
+                }
+                
+                if (-not $allFileHashes.ContainsKey($absolutePath)) {
+                    $entry = $existingEntries.Processed[$processedFile]
+                    $allFileHashes[$absolutePath] = @{
+                        Hash = $entry.Hash
+                        Size = $entry.Size
+                        IsSymlink = if ($entry.ContainsKey('IsSymlink')) { $entry.IsSymlink } else { $false }
+                        RaceConditionDetected = if ($entry.ContainsKey('RaceConditionDetected')) { $entry.RaceConditionDetected } else { $false }
+                        IntegrityVerified = if ($entry.ContainsKey('IntegrityVerified')) { $entry.IntegrityVerified } else { $false }
+                    }
                 }
             }
-        }
-        
-        $directoryHashResult = Get-HashSmithDirectoryIntegrityHash -FileHashes $allFileHashes -Algorithm $HashAlgorithm -BasePath $SourceDir -StrictMode:$StrictMode
-        
-        if ($directoryHashResult) {
-            # Final summary
-            $totalBytes = $directoryHashResult.TotalSize
-            $totalGB = $totalBytes / 1GB
-            $processingTime = $stopwatch.Elapsed.TotalSeconds
-            $throughputMBps = if ($processingTime -gt 0) { ($totalBytes / 1MB) / $processingTime } else { 0 }
             
-            $summaryInfo = @(
-                "",
-                "Total$($HashAlgorithm) = $($directoryHashResult.Hash)",
-                "$($directoryHashResult.FileCount) files checked ($($totalBytes) bytes, $($totalGB.ToString('F2')) GB, $($throughputMBps.ToString('F1')) MB/s)."
-            )
-            
-            $summaryInfo | Add-Content -Path $LogFile -Encoding UTF8
-            Write-Host "✅ Directory hash: $($directoryHashResult.Hash)" -ForegroundColor Green
+            if ($allFileHashes.Count -gt 0) {
+                $directoryHashResult = Get-HashSmithDirectoryIntegrityHash -FileHashes $allFileHashes -Algorithm $HashAlgorithm -BasePath $SourceDir -StrictMode:$StrictMode
+                
+                if ($directoryHashResult) {
+                    # Final summary
+                    $totalBytes = $directoryHashResult.TotalSize
+                    $totalGB = $totalBytes / 1GB
+                    $processingTime = $stopwatch.Elapsed.TotalSeconds
+                    $throughputMBps = if ($processingTime -gt 0) { ($totalBytes / 1MB) / $processingTime } else { 0 }
+                    
+                    $summaryInfo = @(
+                        "",
+                        "Total$($HashAlgorithm) = $($directoryHashResult.Hash)",
+                        "$($directoryHashResult.FileCount) files checked ($($totalBytes) bytes, $($totalGB.ToString('F2')) GB, $($throughputMBps.ToString('F1')) MB/s)."
+                    )
+                    
+                    $summaryInfo | Add-Content -Path $LogFile -Encoding UTF8
+                    Write-Host "✅ Directory hash: $($directoryHashResult.Hash)" -ForegroundColor Green
+                    Write-HashSmithLog -Message "DIRECTORY: Computed integrity hash: $($directoryHashResult.Hash)" -Level SUCCESS -Component 'INTEGRITY'
+                } else {
+                    Write-Host "⚠️  Failed to compute directory integrity hash" -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host "⚠️  No file hashes available for directory integrity computation" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "✅ Directory integrity hash already exists in log" -ForegroundColor Green
         }
     }
     

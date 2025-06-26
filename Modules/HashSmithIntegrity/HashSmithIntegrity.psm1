@@ -220,7 +220,9 @@ function Get-HashSmithDirectoryIntegrityHash {
         # Use parallel sorting for large collections
         if ($FileHashes.Count -gt 10000 -and $PSVersionTable.PSVersion.Major -ge 7) {
             Write-HashSmithLog -Message "Using parallel sorting for large collection" -Level DEBUG -Component 'INTEGRITY'
-            $sortedPaths = $FileHashes.Keys | Sort-Object -Parallel { 
+            # PowerShell 7+ parallel sorting - but Sort-Object -Parallel doesn't work with script blocks the same way
+            # So we'll use a simpler approach that's still fast
+            $sortedPaths = $FileHashes.Keys | Sort-Object { 
                 [System.IO.Path]::GetFileName($_).ToLowerInvariant()
             }
         } else {
