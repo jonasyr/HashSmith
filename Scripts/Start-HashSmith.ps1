@@ -324,6 +324,12 @@ Initialize-HashSmithConfig -ConfigOverrides $configOverrides
 # Get configuration
 $config = Get-HashSmithConfig
 
+# Ensure version is available for header display
+if (-not $config -or -not $config.Version) {
+    Write-Warning "Configuration not loaded properly, using fallback version"
+    $config = @{ Version = "4.1.1" }
+}
+
 # Reset statistics for fresh run
 Reset-HashSmithStatistics
 
@@ -534,15 +540,12 @@ try {
         
         $filterTime = (Get-Date) - $filterStart
         Write-Host "`r   ✅ Resume filtering complete in $($filterTime.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
-        Write-Host "   📊 Files discovered: $($allFiles.Count)" -ForegroundColor Gray
-        Write-Host "   📊 Files in log: $($existingEntries.Processed.Count)" -ForegroundColor Gray
-        Write-Host "   📊 Skipped (already processed): $skippedResumeCount" -ForegroundColor Green
-        Write-Host "   📊 Remaining to process: $($filesToProcess.Count)" -ForegroundColor Cyan
+        Write-Host "   📊 Discovered: $($allFiles.Count), Logged: $($existingEntries.Processed.Count), Skipped: $skippedResumeCount, Remaining: $($filesToProcess.Count)" -ForegroundColor Gray
         
         # Report any discrepancy
         if ($skippedResumeCount -ne $allFiles.Count -and $filesToProcess.Count -eq 0) {
             $missingFromLog = $allFiles.Count - $skippedResumeCount
-            Write-Host "   ⚠️  Note: $missingFromLog files discovered but not found in log (may be new/renamed files)" -ForegroundColor Yellow
+            Write-Host "   ⚠️  Note: $missingFromLog new/renamed files found" -ForegroundColor Yellow
         }
         
         Write-HashSmithLog -Message "RESUME: Discovered $($allFiles.Count) files, skipped $skippedResumeCount already processed, $($filesToProcess.Count) remaining" -Level SUCCESS -Component 'RESUME'
@@ -599,7 +602,8 @@ try {
                     )
                     
                     $summaryInfo | Add-Content -Path $LogFile -Encoding UTF8
-                    Write-Host "✅ Directory integrity hash computed: $($directoryHashResult.Hash)" -ForegroundColor Green
+                    Write-Host "✅ Directory hash added: " -NoNewline -ForegroundColor Green
+                    Write-Host $directoryHashResult.Hash -ForegroundColor Cyan
                     Write-HashSmithLog -Message "DIRECTORY: Computed missing integrity hash: $($directoryHashResult.Hash)" -Level SUCCESS -Component 'INTEGRITY'
                 } else {
                     Write-Host "⚠️  Failed to compute directory integrity hash" -ForegroundColor Yellow
@@ -611,7 +615,7 @@ try {
             }
         }
         
-        Write-Host "   Use -FixErrors to retry failed files if needed" -ForegroundColor Gray
+        Write-Host "   📝 Use -FixErrors to retry failed files if needed" -ForegroundColor Gray
         exit 0
     }
     
@@ -745,7 +749,8 @@ try {
         
         if (-not $hasDirectoryHash) {
             Write-Host ""
-            Write-Host "🔐 Computing directory integrity hash..." -ForegroundColor Cyan
+            Write-Host "🔐 Computing directory integrity hash..." -ForegroundColor Cyan -NoNewline
+            Write-Host " ($($allFileHashes.Count) files)" -ForegroundColor Gray
             
             # Include existing processed files for complete directory hash
             $allFileHashes = @{}
@@ -792,7 +797,8 @@ try {
                     )
                     
                     $summaryInfo | Add-Content -Path $LogFile -Encoding UTF8
-                    Write-Host "✅ Directory hash: $($directoryHashResult.Hash)" -ForegroundColor Green
+                    Write-Host " ✅ " -NoNewline -ForegroundColor Green
+                    Write-Host $directoryHashResult.Hash -ForegroundColor Green
                     Write-HashSmithLog -Message "DIRECTORY: Computed integrity hash: $($directoryHashResult.Hash)" -Level SUCCESS -Component 'INTEGRITY'
                 } else {
                     Write-Host "⚠️  Failed to compute directory integrity hash" -ForegroundColor Yellow
@@ -849,15 +855,17 @@ try {
     Write-Host ""
     Write-ProfessionalHeader -Title "🎉 OPERATION COMPLETE 🎉" -Color "Green"
     
-    Write-Host "📊 Processing Statistics" -ForegroundColor Yellow
+    Write-Host "📊 Final Statistics" -ForegroundColor Yellow
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Blue
     
     Write-StatItem -Icon "🔍" -Label "Files Discovered" -Value $stats.FilesDiscovered -Color "Cyan"
     Write-StatItem -Icon "✅" -Label "Files Processed" -Value $stats.FilesProcessed -Color "Green"
     if ($skippedResumeCount -gt 0) {
-        Write-StatItem -Icon "⏭️" -Label "Files Resumed (Skipped)" -Value $skippedResumeCount -Color "Yellow"
+        Write-StatItem -Icon "⏭️" -Label "Files Skipped" -Value $skippedResumeCount -Color "Yellow"
     }
-    Write-StatItem -Icon "❌" -Label "Files Failed" -Value $stats.FilesError -Color $(if($stats.FilesError -eq 0){"Green"}else{"Red"})
+    if ($stats.FilesError -gt 0) {
+        Write-StatItem -Icon "❌" -Label "Files Failed" -Value $stats.FilesError -Color "Red"
+    }
     Write-StatItem -Icon "💾" -Label "Data Processed" -Value "$('{0:N2} GB' -f ($stats.BytesProcessed / 1GB))" -Color "Magenta"
     Write-StatItem -Icon "⏱️" -Label "Processing Time" -Value "$($stopwatch.Elapsed.ToString('hh\:mm\:ss'))" -Color "Blue"
     
@@ -869,21 +877,23 @@ try {
     Write-Host ""
     Write-Host "📄 Output Files" -ForegroundColor Yellow
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Blue
-    Write-Host "📝 Log File    : $LogFile" -ForegroundColor White
+    Write-Host "📝 Hash Log    : " -NoNewline -ForegroundColor Gray
+    Write-Host $LogFile -ForegroundColor White
     
     if ($UseJsonLog) {
-        Write-Host "📊 JSON Log    : $([System.IO.Path]::ChangeExtension($LogFile, '.json'))" -ForegroundColor Green
+        Write-Host "📊 JSON Report : " -NoNewline -ForegroundColor Gray
+        Write-Host $([System.IO.Path]::ChangeExtension($LogFile, '.json')) -ForegroundColor Green
     }
     
     Write-Host ""
     
     # Completion status
     if ($stats.FilesError -gt 0) {
-        Write-Host "⚠️  COMPLETED WITH WARNINGS" -ForegroundColor Yellow
+        Write-Host "⚠️  COMPLETED WITH ERRORS" -ForegroundColor Yellow
         Write-Host "┌─────────────────────────────────────────┐" -ForegroundColor Yellow
         Write-Host "│  • $($stats.FilesError) files failed processing" -ForegroundColor Red
         Write-Host "│  • Use -FixErrors to retry failed files" -ForegroundColor White
-        Write-Host "│  • Use -Resume to continue if interrupted" -ForegroundColor White
+        Write-Host "│  • Use -Resume to continue processing" -ForegroundColor White
         Write-Host "└─────────────────────────────────────────┘" -ForegroundColor Yellow
         Set-HashSmithExitCode -ExitCode 1
     } else {
@@ -891,7 +901,7 @@ try {
         Write-Host "┌─────────────────────────────────────────┐" -ForegroundColor Green
         Write-Host "│  ✅ Zero errors detected" -ForegroundColor Green
         Write-Host "│  🚀 Processing completed successfully" -ForegroundColor Green
-        Write-Host "│  🛡️ All security checks passed" -ForegroundColor Green
+        Write-Host "│  🛡️ All integrity checks passed" -ForegroundColor Green
         Write-Host "└─────────────────────────────────────────┘" -ForegroundColor Green
     }
     

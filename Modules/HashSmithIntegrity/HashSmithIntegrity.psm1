@@ -349,13 +349,12 @@ function Get-HashSmithDirectoryIntegrityHash {
         Write-HashSmithLog -Message "Performance: $fileCount files in $($totalComputationTime.TotalSeconds.ToString('F2'))s ($($result.Metadata.FilesPerSecond) files/sec)" -Level SUCCESS -Component 'INTEGRITY'
         Write-HashSmithLog -Message "Enhanced processing: $($totalBytes) bytes total, fully compatible with standard MD5 tools" -Level INFO -Component 'INTEGRITY'
         
-        # Performance summary
-        if ($totalComputationTime.TotalSeconds -gt 0.1) {
-            Write-Host ""
-            Write-Host "📊 Enhanced Directory Hash Performance:" -ForegroundColor Cyan
-            Write-Host "   • Total Time: $($totalComputationTime.TotalSeconds.ToString('F2'))s" -ForegroundColor White
-            Write-Host "   • Files/Second: $($result.Metadata.FilesPerSecond)" -ForegroundColor Green
-            Write-Host "   • Performance Improvement: ~5x faster than original" -ForegroundColor Green
+        # Performance summary (only for very large datasets)
+        if ($totalComputationTime.TotalSeconds -gt 5.0 -and $result.FileCount -gt 50000) {
+            Write-Host "   📊 " -NoNewline -ForegroundColor Cyan
+            Write-Host "Performance: " -NoNewline -ForegroundColor White  
+            Write-Host "$($result.Metadata.FilesPerSecond) files/sec " -NoNewline -ForegroundColor Green
+            Write-Host "($($totalComputationTime.TotalSeconds.ToString('F1'))s)" -ForegroundColor Gray
         }
         
         return $result
