@@ -139,6 +139,7 @@ function Initialize-HashSmithConfig {
     
     # Initialize the configuration with defaults
     $Script:HashSmithConfig = @{
+        Version = $Script:Config.Version  # Include version from base config
         Algorithm = 'MD5'
         TargetPath = $PWD.Path
         LogPath = ''

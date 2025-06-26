@@ -319,7 +319,14 @@ catch {
 $configOverrides = @{
     ProgressTimeoutMinutes = $ProgressTimeoutMinutes
 }
-Initialize-HashSmithConfig -ConfigOverrides $configOverrides
+
+try {
+    Initialize-HashSmithConfig -ConfigOverrides $configOverrides
+    Write-Host "✅ Configuration initialized successfully" -ForegroundColor Green
+}
+catch {
+    Write-Warning "Configuration initialization failed: $($_.Exception.Message)"
+}
 
 # Get configuration
 $config = Get-HashSmithConfig
@@ -328,6 +335,8 @@ $config = Get-HashSmithConfig
 if (-not $config -or -not $config.Version) {
     Write-Warning "Configuration not loaded properly, using fallback version"
     $config = @{ Version = "4.1.1" }
+} else {
+    Write-Host "📋 Using configuration version: $($config.Version)" -ForegroundColor Green
 }
 
 # Reset statistics for fresh run
@@ -497,6 +506,35 @@ try {
     if (-not $StrictMode -and $allFiles.Count -gt 100000) {
         Write-Host "💡 For large directories (>100k files), consider using -StrictMode to ensure complete discovery" -ForegroundColor DarkGray
     }
+    
+    # Optional: Add diagnostic information for troubleshooting missing files
+    if ($TestMode) {
+        Write-Host "🔍 Test Mode: Running additional discovery diagnostics..." -ForegroundColor Yellow
+        
+        # Quick verification using basic Get-ChildItem for comparison
+        try {
+            Write-Host "   📊 Running comparative file count check..." -ForegroundColor Gray
+            $basicCount = (Get-ChildItem -Path $SourceDir -File -Recurse -Force:$IncludeHidden -ErrorAction SilentlyContinue | Measure-Object).Count
+            
+            if ($basicCount -ne $allFiles.Count) {
+                $difference = $basicCount - $allFiles.Count
+                Write-Host "   ⚠️  File count discrepancy detected!" -ForegroundColor Red
+                Write-Host "      • Basic enumeration: $basicCount files" -ForegroundColor White
+                Write-Host "      • Optimized discovery: $($allFiles.Count) files" -ForegroundColor White
+                Write-Host "      • Difference: $difference files" -ForegroundColor $(if($difference -gt 0){"Red"}else{"Green"})
+                
+                if ($difference -gt 0) {
+                    Write-Host "   🔍 Consider using -StrictMode for maximum file discovery reliability" -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host "   ✅ File count verification passed - all files discovered" -ForegroundColor Green
+            }
+        }
+        catch {
+            Write-Host "   ⚠️  Could not perform file count verification: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+    
     Write-Host ""
     
     # File filtering for resume functionality
