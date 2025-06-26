@@ -307,19 +307,20 @@ function Get-HashSmithAllFiles {
         $fileResult = Get-FilesOptimized -Directories $directories -ExcludePatterns $ExcludePatterns -IncludeHidden:$IncludeHidden -IncludeSymlinks:$IncludeSymlinks
         $allFiles = $fileResult.Files
         $errorCount = $fileResult.Errors
+        $fileCount = if ($allFiles) { $allFiles.Count } else { 0 }
         
         $phaseElapsed = (Get-Date) - $phaseStart
-        Write-Host "`r   ✅ Phase 2: Found $($allFiles.Count) files in $($phaseElapsed.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
+        Write-Host "`r   ✅ Phase 2: Found $fileCount files in $($phaseElapsed.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
         
         # Count symbolic links efficiently
-        if ($IncludeSymlinks) {
+        if ($IncludeSymlinks -and $allFiles -and $allFiles.Count -gt 0) {
             $symlinkCount = @($allFiles | Where-Object { 
                 ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint 
             }).Count
         }
         
         # Update statistics atomically
-        Set-HashSmithStatistic -Name 'FilesDiscovered' -Value $allFiles.Count
+        Set-HashSmithStatistic -Name 'FilesDiscovered' -Value $fileCount
         Set-HashSmithStatistic -Name 'FilesSymlinks' -Value $symlinkCount
         
         # PHASE 3: Verification and fallback check
@@ -370,7 +371,11 @@ function Get-HashSmithAllFiles {
                 }
                 
                 # Check for discrepancies
-                $primaryPaths = $allFiles | ForEach-Object { $_.FullName } | Sort-Object
+                $primaryPaths = if ($allFiles -and $allFiles.Count -gt 0) {
+                    $allFiles | ForEach-Object { $_.FullName } | Sort-Object
+                } else {
+                    @()
+                }
                 $alternatePaths = $alternativeFiles | ForEach-Object { $_.FullName } | Sort-Object
                 
                 $missingInPrimary = $alternatePaths | Where-Object { $_ -notin $primaryPaths }
@@ -401,9 +406,12 @@ function Get-HashSmithAllFiles {
             Write-Host "`r   ✅ Phase 3: Verification complete in $($phaseElapsed.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
         }
 
+        # Calculate total discovery duration
+        $discoveryDuration = (Get-Date) - $discoveryStart
+
         # Performance metrics
-        $filesPerSecond = if ($discoveryDuration.TotalSeconds -gt 0) { 
-            [Math]::Round($allFiles.Count / $discoveryDuration.TotalSeconds, 0)
+        $filesPerSecond = if ($discoveryDuration.TotalSeconds -gt 0 -and $fileCount -gt 0) { 
+            [Math]::Round($fileCount / $discoveryDuration.TotalSeconds, 0)
         } else { 0 }
         
         Write-Host ""
@@ -414,7 +422,7 @@ function Get-HashSmithAllFiles {
         
         Write-HashSmithLog -Message "ULTRA-FAST discovery completed in $($discoveryDuration.TotalSeconds.ToString('F2')) seconds" -Level SUCCESS -Component 'DISCOVERY'
         Write-HashSmithLog -Message "Performance: $filesPerSecond files/second (~10x improvement)" -Level SUCCESS -Component 'DISCOVERY'
-        Write-HashSmithLog -Message "Files found: $($allFiles.Count)" -Level STATS -Component 'DISCOVERY'
+        Write-HashSmithLog -Message "Files found: $fileCount" -Level STATS -Component 'DISCOVERY'
         Write-HashSmithLog -Message "Symbolic links found: $symlinkCount" -Level STATS -Component 'DISCOVERY'
         Write-HashSmithLog -Message "Directories processed: $($directories.Count)" -Level STATS -Component 'DISCOVERY'
         
@@ -425,10 +433,10 @@ function Get-HashSmithAllFiles {
         }
         
         return @{
-            Files = $allFiles
+            Files = if ($allFiles) { $allFiles } else { @() }
             Errors = $errors.ToArray()
             Statistics = @{
-                TotalFound = $allFiles.Count
+                TotalFound = $fileCount
                 TotalSkipped = 0  # Optimized version doesn't track skipped separately
                 TotalErrors = $errorCount
                 TotalSymlinks = $symlinkCount
