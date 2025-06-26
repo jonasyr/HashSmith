@@ -89,7 +89,7 @@ function Register-GracefulTermination {
     )
     
     # Simple CTRL+C handler
-    Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+    Register-EngineEvent -SourceIdentifier PowerShell.Exiting -SupportEvent -Action {
         $Script:CancellationRequested = $true
         Write-Host "`n🛑 Graceful shutdown initiated..." -ForegroundColor Yellow
         
@@ -210,7 +210,11 @@ function Start-HashSmithFileProcessing {
     $filesToProcess = @()
     $skippedResumeCount = 0
     
-    Write-Host "🔍 Filtering files for resume operation..." -ForegroundColor Cyan
+    # Only show resume filtering message if we actually have processed files to skip
+    $hasProcessedFiles = $ExistingEntries.Processed.Count -gt 0
+    if ($hasProcessedFiles) {
+        Write-Host "🔍 Filtering files for resume operation..." -ForegroundColor Cyan
+    }
     
     foreach ($file in $Files) {
         $absolutePath = $file.FullName

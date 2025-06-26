@@ -282,7 +282,8 @@ function Get-StreamingHashOptimized {
                 }
             }
             
-            # Progress reporting for large files
+            # Progress reporting for large files (shows current file being processed)
+            # This displays the file currently taking the most time (typically the largest)
             if ($ProgressCallback -gt 0 -and $fileSize -gt 100MB) {
                 $now = Get-Date
                 if (($now - $lastProgressUpdate).TotalSeconds -ge 2) {

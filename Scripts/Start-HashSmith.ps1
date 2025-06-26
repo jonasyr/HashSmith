@@ -251,7 +251,7 @@ function Register-MainScriptTermination {
     )
     
     # Register CTRL+C handler for main script
-    Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+    Register-EngineEvent -SourceIdentifier PowerShell.Exiting -SupportEvent -Action {
         Write-Host "`n🛑 Graceful shutdown initiated..." -ForegroundColor Yellow
         
         try {
@@ -417,6 +417,9 @@ try {
     Write-ConfigItem -Icon "🔗" -Label "Include Symlinks" -Value $IncludeSymlinks -Color $(if($IncludeSymlinks){"Green"}else{"Red"})
     Write-ConfigItem -Icon "🛡️ " -Label "Verify Integrity" -Value $VerifyIntegrity -Color $(if($VerifyIntegrity){"Green"}else{"Gray"})
     Write-ConfigItem -Icon "⚡" -Label "Strict Mode" -Value $StrictMode -Color $(if($StrictMode){"Yellow"}else{"Gray"})
+    if (-not $StrictMode) {
+        Write-Host "   💡 Tip: Use -StrictMode for maximum file discovery reliability (slower but comprehensive)" -ForegroundColor DarkGray
+    }
     Write-ConfigItem -Icon "🧪" -Label "Test Mode" -Value $TestMode -Color $(if($TestMode){"Yellow"}else{"Gray"})
     
     # Display resume status
@@ -489,6 +492,11 @@ try {
     Write-StatItem -Icon "⏱️" -Label "Discovery Time" -Value "$($discoveryStats.DiscoveryTime.ToString('F2'))s" -Color "Blue"
     Write-StatItem -Icon "🚀" -Label "Performance" -Value "$($discoveryStats.FilesPerSecond) files/second" -Color "Green"
     Write-Host "└─────────────────────────────────────────┘" -ForegroundColor Gray
+    
+    # Add helpful information about file discovery
+    if (-not $StrictMode -and $allFiles.Count -gt 100000) {
+        Write-Host "💡 For large directories (>100k files), consider using -StrictMode to ensure complete discovery" -ForegroundColor DarkGray
+    }
     Write-Host ""
     
     # File filtering for resume functionality

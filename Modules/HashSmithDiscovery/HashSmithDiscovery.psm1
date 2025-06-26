@@ -34,7 +34,8 @@ function Get-DirectoriesParallel {
     [CmdletBinding()]
     param(
         [string]$RootPath,
-        [int]$MaxDepth = 50
+        [int]$MaxDepth = 50,
+        [bool]$IncludeHidden = $true
     )
     
     $allDirectories = [System.Collections.Concurrent.ConcurrentBag[string]]::new()
@@ -62,7 +63,11 @@ function Get-DirectoriesParallel {
                     $enumOptions.RecurseSubdirectories = $false
                     $enumOptions.ReturnSpecialDirectories = $false
                     $enumOptions.IgnoreInaccessible = $true
-                    $enumOptions.AttributesToSkip = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+                    
+                    # Only skip hidden/system directories if not including hidden files
+                    if (-not $using:IncludeHidden) {
+                        $enumOptions.AttributesToSkip = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+                    }
                     
                     $dirs = [System.IO.Directory]::EnumerateDirectories($directory, '*', $enumOptions)
                     foreach ($dir in $dirs) {
@@ -290,7 +295,7 @@ function Get-HashSmithAllFiles {
         Write-Host "   📁 Phase 1: Parallel directory discovery..." -NoNewline -ForegroundColor Yellow
         $phaseStart = Get-Date
         
-        $directories = Get-DirectoriesParallel -RootPath $normalizedPath -MaxDepth 50
+        $directories = Get-DirectoriesParallel -RootPath $normalizedPath -MaxDepth 50 -IncludeHidden:$IncludeHidden
         
         $phaseElapsed = (Get-Date) - $phaseStart
         Write-Host "`r   ✅ Phase 1: Found $($directories.Count) directories in $($phaseElapsed.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
@@ -317,50 +322,126 @@ function Get-HashSmithAllFiles {
         Set-HashSmithStatistic -Name 'FilesDiscovered' -Value $allFiles.Count
         Set-HashSmithStatistic -Name 'FilesSymlinks' -Value $symlinkCount
         
+        # PHASE 3: Verification and fallback check
+        Write-Host "   🔍 Phase 3: Verification and fallback check..." -NoNewline -ForegroundColor Yellow
+        $phaseStart = Get-Date
+        
+        # If StrictMode is enabled, do additional verification
+        $additionalFiles = @()
+        if ($StrictMode) {
+            try {
+                # Use alternative enumeration method as fallback
+                $alternativeFiles = @()
+                $enumOptions = [System.IO.EnumerationOptions]::new()
+                $enumOptions.RecurseSubdirectories = $true
+                $enumOptions.ReturnSpecialDirectories = $false
+                $enumOptions.IgnoreInaccessible = $true
+                
+                if (-not $IncludeHidden) {
+                    $enumOptions.AttributesToSkip = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+                }
+                
+                $allPaths = [System.IO.Directory]::EnumerateFiles($normalizedPath, '*', $enumOptions)
+                foreach ($filePath in $allPaths) {
+                    try {
+                        $fileInfo = [System.IO.FileInfo]::new($filePath)
+                        
+                        # Apply same filtering logic
+                        if (-not $IncludeSymlinks -and 
+                            ($fileInfo.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint) {
+                            continue
+                        }
+                        
+                        $shouldExclude = $false
+                        foreach ($pattern in $ExcludePatterns) {
+                            if ($fileInfo.Name -like $pattern) {
+                                $shouldExclude = $true
+                                break
+                            }
+                        }
+                        
+                        if (-not $shouldExclude) {
+                            $alternativeFiles += $fileInfo
+                        }
+                    }
+                    catch {
+                        # Skip problematic files
+                    }
+                }
+                
+                # Check for discrepancies
+                $primaryPaths = $allFiles | ForEach-Object { $_.FullName } | Sort-Object
+                $alternatePaths = $alternativeFiles | ForEach-Object { $_.FullName } | Sort-Object
+                
+                $missingInPrimary = $alternatePaths | Where-Object { $_ -notin $primaryPaths }
+                if ($missingInPrimary.Count -gt 0) {
+                    Write-Host "`r   ⚠️  StrictMode: Found $($missingInPrimary.Count) additional files, adding to results..." -ForegroundColor Yellow
+                    
+                    foreach ($missingPath in $missingInPrimary) {
+                        try {
+                            $missingFile = [System.IO.FileInfo]::new($missingPath)
+                            $allFiles.Add($missingFile)
+                            $additionalFiles += $missingFile
+                        }
+                        catch {
+                            # Skip if file no longer accessible
+                        }
+                    }
+                }
+            }
+            catch {
+                Write-Host "`r   ⚠️  StrictMode verification failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+        
+        $phaseElapsed = (Get-Date) - $phaseStart
+        if ($additionalFiles.Count -gt 0) {
+            Write-Host "`r   ✅ Phase 3: Added $($additionalFiles.Count) additional files in $($phaseElapsed.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
+        } else {
+            Write-Host "`r   ✅ Phase 3: Verification complete in $($phaseElapsed.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
+        }
+
+        # Performance metrics
+        $filesPerSecond = if ($discoveryDuration.TotalSeconds -gt 0) { 
+            [Math]::Round($allFiles.Count / $discoveryDuration.TotalSeconds, 0)
+        } else { 0 }
+        
+        Write-Host ""
+        Write-Host "🎯 ULTRA-FAST Discovery Results:" -ForegroundColor Green
+        Write-Host "   ⚡ Performance: $filesPerSecond files/second" -ForegroundColor Magenta
+        Write-Host "   📊 Total time: $($discoveryDuration.TotalSeconds.ToString('F1'))s (vs. 4+ minutes before)" -ForegroundColor Cyan
+        Write-Host "   🚀 Speed improvement: ~10x faster than original implementation" -ForegroundColor Green
+        
+        Write-HashSmithLog -Message "ULTRA-FAST discovery completed in $($discoveryDuration.TotalSeconds.ToString('F2')) seconds" -Level SUCCESS -Component 'DISCOVERY'
+        Write-HashSmithLog -Message "Performance: $filesPerSecond files/second (~10x improvement)" -Level SUCCESS -Component 'DISCOVERY'
+        Write-HashSmithLog -Message "Files found: $($allFiles.Count)" -Level STATS -Component 'DISCOVERY'
+        Write-HashSmithLog -Message "Symbolic links found: $symlinkCount" -Level STATS -Component 'DISCOVERY'
+        Write-HashSmithLog -Message "Directories processed: $($directories.Count)" -Level STATS -Component 'DISCOVERY'
+        
+        # Enhanced test mode validation if requested
+        if ($TestMode) {
+            Write-HashSmithLog -Message "Test Mode: Validating ultra-fast discovery completeness" -Level INFO -Component 'TEST'
+            Test-HashSmithFileDiscoveryCompleteness -Path $Path -DiscoveredFiles $allFiles -IncludeHidden:$IncludeHidden -IncludeSymlinks:$IncludeSymlinks -StrictMode:$StrictMode
+        }
+        
+        return @{
+            Files = $allFiles
+            Errors = $errors.ToArray()
+            Statistics = @{
+                TotalFound = $allFiles.Count
+                TotalSkipped = 0  # Optimized version doesn't track skipped separately
+                TotalErrors = $errorCount
+                TotalSymlinks = $symlinkCount
+                DiscoveryTime = $discoveryDuration.TotalSeconds
+                DirectoriesProcessed = $directories.Count
+                FilesPerSecond = $filesPerSecond
+            }
+        }
     }
     catch {
         Write-HashSmithLog -Message "Critical error during optimized file discovery: $($_.Exception.Message)" -Level ERROR -Component 'DISCOVERY'
         Add-HashSmithStatistic -Name 'DiscoveryErrors' -Amount 1
         throw
-    }
-    
-    $discoveryDuration = (Get-Date) - $discoveryStart
-    
-    # Performance metrics
-    $filesPerSecond = if ($discoveryDuration.TotalSeconds -gt 0) { 
-        [Math]::Round($allFiles.Count / $discoveryDuration.TotalSeconds, 0)
-    } else { 0 }
-    
-    Write-Host ""
-    Write-Host "🎯 ULTRA-FAST Discovery Results:" -ForegroundColor Green
-    Write-Host "   ⚡ Performance: $filesPerSecond files/second" -ForegroundColor Magenta
-    Write-Host "   📊 Total time: $($discoveryDuration.TotalSeconds.ToString('F1'))s (vs. 4+ minutes before)" -ForegroundColor Cyan
-    Write-Host "   🚀 Speed improvement: ~10x faster than original implementation" -ForegroundColor Green
-    
-    Write-HashSmithLog -Message "ULTRA-FAST discovery completed in $($discoveryDuration.TotalSeconds.ToString('F2')) seconds" -Level SUCCESS -Component 'DISCOVERY'
-    Write-HashSmithLog -Message "Performance: $filesPerSecond files/second (~10x improvement)" -Level SUCCESS -Component 'DISCOVERY'
-    Write-HashSmithLog -Message "Files found: $($allFiles.Count)" -Level STATS -Component 'DISCOVERY'
-    Write-HashSmithLog -Message "Symbolic links found: $symlinkCount" -Level STATS -Component 'DISCOVERY'
-    Write-HashSmithLog -Message "Directories processed: $($directories.Count)" -Level STATS -Component 'DISCOVERY'
-    
-    # Enhanced test mode validation if requested
-    if ($TestMode) {
-        Write-HashSmithLog -Message "Test Mode: Validating ultra-fast discovery completeness" -Level INFO -Component 'TEST'
-        Test-HashSmithFileDiscoveryCompleteness -Path $Path -DiscoveredFiles $allFiles -IncludeHidden:$IncludeHidden -IncludeSymlinks:$IncludeSymlinks -StrictMode:$StrictMode
-    }
-    
-    return @{
-        Files = $allFiles
-        Errors = $errors.ToArray()
-        Statistics = @{
-            TotalFound = $allFiles.Count
-            TotalSkipped = 0  # Optimized version doesn't track skipped separately
-            TotalErrors = $errorCount
-            TotalSymlinks = $symlinkCount
-            DiscoveryTime = $discoveryDuration.TotalSeconds
-            DirectoriesProcessed = $directories.Count
-            FilesPerSecond = $filesPerSecond
-        }
     }
 }
 
