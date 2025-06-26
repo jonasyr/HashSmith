@@ -161,6 +161,7 @@ Contact your IT administrator for the enterprise MSI package with GPO deployment
 | `MaxThreads` | Int | CPU cores | Maximum parallel threads |
 | `ChunkSize` | Int | 1000 | Files per processing batch |
 | `TimeoutSeconds` | Int | 30 | File operation timeout |
+| `ProgressTimeoutMinutes` | Int | 120 | No-progress timeout for large files |
 | `UseParallel` | Switch | Auto | Force parallel processing |
 
 ### Security & Compliance
@@ -236,6 +237,12 @@ $excludePatterns = @("*.tmp", "*.log", "Thumbs.db", ".DS_Store")
 ```powershell
 # Enable size-based sorting for better progress indication
 -SortFilesBySize -TimeoutSeconds 120
+```
+
+#### For Extremely Large Files (>50 GB)
+```powershell
+# Extended timeout for massive files that may take hours to hash
+-ProgressTimeoutMinutes 480 -TimeoutSeconds 300
 ```
 
 ### Expected Performance

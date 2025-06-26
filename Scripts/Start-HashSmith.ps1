@@ -51,6 +51,10 @@
     
 .PARAMETER TimeoutSeconds
     Timeout for file operations in seconds (default: 30).
+
+.PARAMETER ProgressTimeoutMinutes
+    Timeout in minutes for no progress before stopping processing (default: 120 minutes).
+    This allows large files (e.g., 80GB+) to be processed without timing out.
     
 .PARAMETER UseJsonLog
     Output structured JSON log alongside text log.
@@ -166,6 +170,10 @@ param(
     [Parameter()]
     [ValidateRange(10, 300)]
     [int]$TimeoutSeconds = 30,
+    
+    [Parameter()]
+    [ValidateRange(5, 1440)]  # 5 minutes to 24 hours
+    [int]$ProgressTimeoutMinutes = 120,
     
     [Parameter()]
     [switch]$UseJsonLog,
@@ -290,7 +298,9 @@ catch {
 }
 
 # Initialize configuration with any custom overrides
-$configOverrides = @{}
+$configOverrides = @{
+    ProgressTimeoutMinutes = $ProgressTimeoutMinutes
+}
 Initialize-HashSmithConfig -ConfigOverrides $configOverrides
 
 # Get configuration for version display
@@ -803,7 +813,7 @@ try {
     }
     Write-Host ""
     
-    $fileHashes = Start-HashSmithFileProcessing -Files $filesToProcess -LogPath $LogFile -Algorithm $HashAlgorithm -ExistingEntries $existingEntries -BasePath $SourceDir -StrictMode:$StrictMode -VerifyIntegrity:$VerifyIntegrity -MaxThreads $MaxThreads -ChunkSize $ChunkSize -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -ShowProgress:$ShowProgress -UseParallel:$useParallel
+    $fileHashes = Start-HashSmithFileProcessing -Files $filesToProcess -LogPath $LogFile -Algorithm $HashAlgorithm -ExistingEntries $existingEntries -BasePath $SourceDir -StrictMode:$StrictMode -VerifyIntegrity:$VerifyIntegrity -MaxThreads $MaxThreads -ChunkSize $ChunkSize -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -ProgressTimeoutMinutes $ProgressTimeoutMinutes -ShowProgress:$ShowProgress -UseParallel:$useParallel
     
     # Handle both hashtable and array returns from the processor
     $actualFileHashes = if ($fileHashes -is [hashtable]) {
@@ -893,6 +903,7 @@ try {
                 ChunkSize = $ChunkSize
                 RetryCount = $RetryCount
                 TimeoutSeconds = $TimeoutSeconds
+                ProgressTimeoutMinutes = $ProgressTimeoutMinutes
             }
             Statistics = $stats
             DiscoveryStats = $discoveryStats

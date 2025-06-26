@@ -55,6 +55,9 @@
 .PARAMETER TimeoutSeconds
     Timeout for file operations
 
+.PARAMETER ProgressTimeoutMinutes
+    Timeout in minutes for no progress before stopping (default: 120 minutes for large files)
+
 .PARAMETER ShowProgress
     Show progress information
 
@@ -98,6 +101,9 @@ function Start-HashSmithFileProcessing {
         [ValidateRange(10, 300)]
         [int]$TimeoutSeconds = 30,
         
+        [ValidateRange(5, 1440)]  # 5 minutes to 24 hours
+        [int]$ProgressTimeoutMinutes = 120,
+        
         [switch]$ShowProgress,
         
         [switch]$UseParallel
@@ -105,6 +111,7 @@ function Start-HashSmithFileProcessing {
     
     Write-HashSmithLog -Message "Starting enhanced file processing with $($Files.Count) files" -Level INFO -Component 'PROCESS'
     Write-HashSmithLog -Message "Algorithm: $Algorithm, Strict Mode: $StrictMode, Verify Integrity: $VerifyIntegrity" -Level INFO -Component 'PROCESS'
+    Write-HashSmithLog -Message "Progress timeout set to $ProgressTimeoutMinutes minutes for large file processing" -Level INFO -Component 'PROCESS'
     
     # Calculate optimal thread count for stability
     $safeThreads = if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
@@ -257,9 +264,9 @@ function Start-HashSmithFileProcessing {
                 if ($completedCount -gt $lastProgressCount) {
                     $lastProgressCount = $completedCount
                     $lastProgressTime = Get-Date
-                } elseif ($timeSinceLastProgress.TotalMinutes -gt 15) {
-                    # Timeout after 15 minutes of no progress
-                    Write-Host "`r   ⚠️  No progress for 15 minutes, stopping chunk..." -ForegroundColor Red
+                } elseif ($timeSinceLastProgress.TotalMinutes -gt $ProgressTimeoutMinutes) {
+                    # Timeout after configured minutes of no progress
+                    Write-Host "`r   ⚠️  No progress for $ProgressTimeoutMinutes minutes, stopping chunk..." -ForegroundColor Red
                     Stop-Job $chunkResults -ErrorAction SilentlyContinue
                     break
                 }

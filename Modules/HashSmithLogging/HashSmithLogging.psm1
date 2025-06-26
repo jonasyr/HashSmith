@@ -367,53 +367,92 @@ function Get-HashSmithExistingEntries {
     
     Write-HashSmithLog -Message "Loading existing log entries from: $LogPath" -Level INFO -Component 'LOG'
     
+    # Show immediate activity feedback
+    Write-Host "📖 Reading existing log file..." -ForegroundColor Yellow -NoNewline
+    
     try {
-        $lines = Get-Content $LogPath -Encoding UTF8
+        # Get file size for progress calculation
+        $fileInfo = Get-Item $LogPath
+        $fileSize = $fileInfo.Length
+        Write-Host "`r📖 Reading log file ($([Math]::Round($fileSize / 1MB, 2)) MB)..." -NoNewline -ForegroundColor Yellow
         
-        foreach ($line in $lines) {
-            # Skip comments and empty lines
-            if ($line.StartsWith('#') -or [string]::IsNullOrWhiteSpace($line)) {
-                continue
-            }
-            
-            # Parse successful entries: path = hash, size: bytes
-            if ($line -match '^(.+?)\s*=\s*([a-fA-F0-9]+)\s*,\s*size:\s*(\d+)$') {
-                $path = $matches[1]
-                $hash = $matches[2]
-                $size = [long]$matches[3]
+        # Use StreamReader for memory-efficient line-by-line reading
+        $reader = [System.IO.StreamReader]::new($LogPath, [System.Text.Encoding]::UTF8)
+        $lineCount = 0
+        $processedLines = 0
+        $lastProgressUpdate = Get-Date
+        $progressChars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
+        $progressIndex = 0
+        
+        try {
+            while (($line = $reader.ReadLine()) -ne $null) {
+                $lineCount++
                 
-                $entries.Processed[$path] = @{
-                    Hash = $hash
-                    Size = $size
-                    Modified = [DateTime]::MinValue  # Default since we don't store this anymore
-                    IsSymlink = $false  # Default since we don't store flags anymore
-                    RaceConditionDetected = $false
-                    IntegrityVerified = $false
+                # Show progress every 1000 lines or every 2 seconds
+                if ($lineCount % 1000 -eq 0 -or ((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 2) {
+                    $char = $progressChars[$progressIndex % $progressChars.Length]
+                    $bytesRead = $reader.BaseStream.Position
+                    $percent = if ($fileSize -gt 0) { [Math]::Round(($bytesRead / $fileSize) * 100, 1) } else { 0 }
+                    $progressMessage = "$char Loading log: $lineCount lines | $percent% | $($entries.Statistics.ProcessedCount) entries"
+                    Write-Host "`r$progressMessage$(' ' * 10)" -NoNewline -ForegroundColor Cyan
+                    $lastProgressUpdate = Get-Date
+                    $progressIndex++
                 }
                 
-                $entries.Statistics.ProcessedCount++
-            }
-            # Parse error entries: path = ERROR(category): message, size: bytes
-            elseif ($line -match '^(.+?)\s*=\s*ERROR\(([^)]+)\):\s*(.+?)\s*,\s*size:\s*(\d+)$') {
-                $path = $matches[1]
-                $category = $matches[2]
-                $errorMessage = $matches[3]
-                $size = [long]$matches[4]
-                
-                $entries.Failed[$path] = @{
-                    Error = $errorMessage
-                    ErrorCategory = $category
-                    Size = $size
-                    Modified = [DateTime]::MinValue  # Default since we don't store this anymore
-                    IsSymlink = $false
-                    RaceConditionDetected = $false
+                # Skip comments and empty lines
+                if ($line.StartsWith('#') -or [string]::IsNullOrWhiteSpace($line)) {
+                    continue
                 }
                 
-                $entries.Statistics.FailedCount++
+                $processedLines++
+                
+                # Parse successful entries: path = hash, size: bytes
+                if ($line -match '^(.+?)\s*=\s*([a-fA-F0-9]+)\s*,\s*size:\s*(\d+)$') {
+                    $path = $matches[1]
+                    $hash = $matches[2]
+                    $size = [long]$matches[3]
+                    
+                    $entries.Processed[$path] = @{
+                        Hash = $hash
+                        Size = $size
+                        Modified = [DateTime]::MinValue  # Default since we don't store this anymore
+                        IsSymlink = $false  # Default since we don't store flags anymore
+                        RaceConditionDetected = $false
+                        IntegrityVerified = $false
+                    }
+                    
+                    $entries.Statistics.ProcessedCount++
+                }
+                # Parse error entries: path = ERROR(category): message, size: bytes
+                elseif ($line -match '^(.+?)\s*=\s*ERROR\(([^)]+)\):\s*(.+?)\s*,\s*size:\s*(\d+)$') {
+                    $path = $matches[1]
+                    $category = $matches[2]
+                    $errorMessage = $matches[3]
+                    $size = [long]$matches[4]
+                    
+                    $entries.Failed[$path] = @{
+                        Error = $errorMessage
+                        ErrorCategory = $category
+                        Size = $size
+                        Modified = [DateTime]::MinValue  # Default since we don't store this anymore
+                        IsSymlink = $false
+                        RaceConditionDetected = $false
+                    }
+                    
+                    $entries.Statistics.FailedCount++
+                }
             }
         }
+        finally {
+            $reader.Close()
+            $reader.Dispose()
+        }
         
-        Write-HashSmithLog -Message "Loaded $($entries.Statistics.ProcessedCount) processed entries and $($entries.Statistics.FailedCount) failed entries" -Level SUCCESS -Component 'LOG'
+        # Clear the progress line
+        Write-Host "`r$(' ' * 80)`r" -NoNewline
+        
+        Write-Host "✅ Log loading completed" -ForegroundColor Green
+        Write-HashSmithLog -Message "Loaded $($entries.Statistics.ProcessedCount) processed entries and $($entries.Statistics.FailedCount) failed entries from $lineCount total lines" -Level SUCCESS -Component 'LOG'
         Write-HashSmithLog -Message "Special entries: $($entries.Statistics.SymlinkCount) symlinks, $($entries.Statistics.RaceConditionCount) race conditions, $($entries.Statistics.IntegrityVerifiedCount) integrity verified" -Level INFO -Component 'LOG'
         
     }

@@ -57,6 +57,12 @@ function Initialize-Statistics {
     [CmdletBinding()]
     param()
     
+    # Ensure the Statistics object is properly initialized
+    if ($null -eq $Script:Statistics -or $Script:Statistics -isnot [System.Collections.Concurrent.ConcurrentDictionary[string, object]]) {
+        Write-Verbose "Initializing Statistics ConcurrentDictionary"
+        $Script:Statistics = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
+    }
+    
     $defaultStats = @{
         StartTime = Get-Date
         FilesDiscovered = 0
@@ -127,6 +133,7 @@ function Initialize-HashSmithConfig {
         LogLevel = 'INFO'
         RetryCount = 3
         TimeoutSeconds = 30
+        ProgressTimeoutMinutes = 120  # 2 hours for no progress timeout (for large files)
         ExcludePatterns = @()
         MaxLogBatchSize = 100
         LogBatchInterval = 5000
@@ -188,17 +195,34 @@ function Get-HashSmithStatistics {
     param()
     
     $result = @{}
-    # Use lock-free snapshot approach
-    foreach ($key in $Script:Statistics.Keys.ToArray()) {
-        $value = $null
-        if ($Script:Statistics.TryGetValue($key, [ref]$value)) {
-            if ($value -is [System.Collections.Concurrent.ConcurrentBag[object]]) {
-                $result[$key] = @($value.ToArray())
-            } else {
-                $result[$key] = $value
+    
+    # Ensure Statistics is properly initialized
+    if ($null -eq $Script:Statistics -or $Script:Statistics -isnot [System.Collections.Concurrent.ConcurrentDictionary[string, object]]) {
+        Write-Warning "Statistics not properly initialized, reinitializing..."
+        $Script:Statistics = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
+        return $result
+    }
+    
+    try {
+        # Use lock-free snapshot approach with error handling
+        $keys = @($Script:Statistics.Keys)
+        foreach ($key in $keys) {
+            $value = $null
+            if ($Script:Statistics.TryGetValue($key, [ref]$value)) {
+                if ($value -is [System.Collections.Concurrent.ConcurrentBag[object]]) {
+                    $result[$key] = @($value.ToArray())
+                } else {
+                    $result[$key] = $value
+                }
             }
         }
     }
+    catch {
+        Write-Warning "Error accessing statistics: $($_.Exception.Message)"
+        # Return empty result on error
+        $result = @{}
+    }
+    
     return $result
 }
 
@@ -359,8 +383,16 @@ function Reset-HashSmithStatistics {
     [CmdletBinding()]
     param()
     
-    # Use lock-free approach - clear and reinitialize
-    $Script:Statistics.Clear()
+    # Ensure Statistics is properly initialized before clearing
+    if ($null -eq $Script:Statistics -or $Script:Statistics -isnot [System.Collections.Concurrent.ConcurrentDictionary[string, object]]) {
+        Write-Warning "Statistics not properly initialized in Reset-HashSmithStatistics, reinitializing..."
+        $Script:Statistics = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
+    } else {
+        # Use lock-free approach - clear existing statistics
+        $Script:Statistics.Clear()
+    }
+    
+    # Reinitialize with defaults
     Initialize-Statistics
 }
 
@@ -390,7 +422,18 @@ function Set-HashSmithStatistic {
         $Value
     )
     
-    $Script:Statistics.AddOrUpdate($Name, $Value, { param($key, $oldValue) $Value })
+    # Ensure Statistics is properly initialized
+    if ($null -eq $Script:Statistics -or $Script:Statistics -isnot [System.Collections.Concurrent.ConcurrentDictionary[string, object]]) {
+        Write-Warning "Statistics not properly initialized in Set-HashSmithStatistic, reinitializing..."
+        $Script:Statistics = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
+    }
+    
+    try {
+        $Script:Statistics.AddOrUpdate($Name, $Value, { param($key, $oldValue) $Value })
+    }
+    catch {
+        Write-Warning "Error setting statistic '$Name': $($_.Exception.Message)"
+    }
 }
 
 <#
@@ -418,14 +461,25 @@ function Add-HashSmithStatistic {
         [long]$Amount = 1
     )
     
-    $Script:Statistics.AddOrUpdate($Name, $Amount, { 
-        param($key, $oldValue) 
-        if ($oldValue -is [long] -or $oldValue -is [int]) {
-            return $oldValue + $Amount
-        } else {
-            return $Amount
-        }
-    })
+    # Ensure Statistics is properly initialized
+    if ($null -eq $Script:Statistics -or $Script:Statistics -isnot [System.Collections.Concurrent.ConcurrentDictionary[string, object]]) {
+        Write-Warning "Statistics not properly initialized in Add-HashSmithStatistic, reinitializing..."
+        $Script:Statistics = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
+    }
+    
+    try {
+        $Script:Statistics.AddOrUpdate($Name, $Amount, { 
+            param($key, $oldValue) 
+            if ($oldValue -is [long] -or $oldValue -is [int]) {
+                return $oldValue + $Amount
+            } else {
+                return $Amount
+            }
+        })
+    }
+    catch {
+        Write-Warning "Error adding to statistic '$Name': $($_.Exception.Message)"
+    }
 }
 
 <#
