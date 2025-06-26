@@ -371,12 +371,15 @@ function Test-Permissions {
     Write-Host "🔐 Validating Permissions" -ForegroundColor Cyan
     Write-Host "=" * 50
     
+    # Cross-platform temp directory
+    $TempDir = if ($env:TEMP) { $env:TEMP } elseif ($env:TMPDIR) { $env:TMPDIR } else { '/tmp' }
+    
     # Test write permissions to temp directory
-    $tempTestFile = Join-Path $env:TEMP "HashSmithPermissionTest_$(Get-Random).txt"
+    $tempTestFile = Join-Path $TempDir "HashSmithPermissionTest_$(Get-Random).txt"
     try {
         "Test content" | Set-Content -Path $tempTestFile -ErrorAction Stop
         Remove-Item $tempTestFile -Force -ErrorAction SilentlyContinue
-        Write-ValidationResult -Category 'Permissions' -Status 'Pass' -Message "Temp directory write access confirmed"
+        Write-ValidationResult -Category 'Permissions' -Status 'Pass' -Message "Temp directory write access confirmed ($TempDir)"
     } catch {
         Write-ValidationResult -Category 'Permissions' -Status 'Fail' -Message "Cannot write to temp directory: $($_.Exception.Message)"
     }
@@ -450,7 +453,9 @@ function Test-Performance {
     
     # Disk speed test
     try {
-        $testFile = Join-Path $env:TEMP "HashSmithDiskSpeedTest_$(Get-Random).bin"
+        # Cross-platform temp directory
+        $TempDir = if ($env:TEMP) { $env:TEMP } elseif ($env:TMPDIR) { $env:TMPDIR } else { '/tmp' }
+        $testFile = Join-Path $TempDir "HashSmithDiskSpeedTest_$(Get-Random).bin"
         $testData = [byte[]]::new(1MB)
         [System.Random]::new().NextBytes($testData)
         

@@ -85,7 +85,7 @@ function New-TestEnvironment {
     [CmdletBinding()]
     param(
         [Parameter()]
-        [string]$BasePath = $env:TEMP,
+        [string]$BasePath,
         
         [Parameter()]
         [switch]$IncludeComplexData,
@@ -93,6 +93,11 @@ function New-TestEnvironment {
         [Parameter()]
         [hashtable]$CustomConfiguration = @{}
     )
+    
+    # Cross-platform temp directory handling
+    if (-not $BasePath) {
+        $BasePath = if ($env:TEMP) { $env:TEMP } elseif ($env:TMPDIR) { $env:TMPDIR } else { '/tmp' }
+    }
     
     # Create unique test environment
     $testEnvId = "HashSmithTest_$(Get-Date -Format 'yyyyMMdd_HHmmss')_$(Get-Random -Maximum 9999)"

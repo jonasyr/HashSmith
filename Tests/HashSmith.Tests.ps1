@@ -16,7 +16,7 @@
 
 BeforeAll {
     # Import required modules - adjust paths relative to project root
-    $ProjectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    $ProjectRoot = Split-Path $PSScriptRoot -Parent
     $ModulesPath = Join-Path $ProjectRoot "Modules"
     $TestHelpersPath = Join-Path $PSScriptRoot "Helpers"
     $SampleDataPath = Join-Path $PSScriptRoot "SampleData"
@@ -59,8 +59,9 @@ BeforeAll {
     # Create sample test data files
     Initialize-TestData -SampleDataPath $SampleDataPath
     
-    # Set global test variables
-    $Global:TestLogPath = Join-Path $env:TEMP "HashSmithTest_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+    # Set global test variables with cross-platform temp directory
+    $TempDir = if ($env:TEMP) { $env:TEMP } elseif ($env:TMPDIR) { $env:TMPDIR } else { '/tmp' }
+    $Global:TestLogPath = Join-Path $TempDir "HashSmithTest_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
     $Global:TestSourceDir = $SampleDataPath
 }
 

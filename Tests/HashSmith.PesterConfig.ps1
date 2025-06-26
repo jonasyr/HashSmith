@@ -99,7 +99,8 @@ if ($WithCoverage) {
         Join-Path $ModulesPath "HashSmithIntegrity\*.ps1"
         Join-Path $ModulesPath "HashSmithProcessor\*.ps1"
     )
-    $pesterConfig.CodeCoverage.OutputFormat = @('JaCoCo', 'CoverageGutters')
+    # Fix for Pester 5.7.1 - OutputFormat expects string, not array
+    $pesterConfig.CodeCoverage.OutputFormat = 'JaCoCo'
     $pesterConfig.CodeCoverage.OutputPath = Join-Path $TestsPath "CodeCoverage.xml"
     $pesterConfig.CodeCoverage.CoveragePercentTarget = 80
     Write-Host "📊 Code coverage enabled (target: 80%)" -ForegroundColor Cyan

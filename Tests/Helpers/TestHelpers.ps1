@@ -308,7 +308,9 @@ function New-TestDirectory {
         [string]$Prefix = "HashSmithTest"
     )
     
-    $testDir = Join-Path $env:TEMP "$Prefix`_$(Get-Date -Format 'yyyyMMdd_HHmmss')_$(Get-Random -Maximum 9999)"
+    # Cross-platform temp directory
+    $TempBase = if ($env:TEMP) { $env:TEMP } elseif ($env:TMPDIR) { $env:TMPDIR } else { '/tmp' }
+    $testDir = Join-Path $TempBase "$Prefix`_$(Get-Date -Format 'yyyyMMdd_HHmmss')_$(Get-Random -Maximum 9999)"
     New-Item -Path $testDir -ItemType Directory -Force | Out-Null
     
     # Register cleanup (if running in Pester context)

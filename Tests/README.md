@@ -46,35 +46,45 @@ Get-Module Pester -ListAvailable | Select-Object Version
 
 ## Running Tests
 
-### Run All Tests
+### Quick Start (Cross-Platform)
+
+For the fastest and most reliable test execution across all platforms:
 
 ```powershell
-# Navigate to project root
-cd path\to\HashSmith
+# Fix any cross-platform issues first (Linux/macOS)
+.\Tests\Fix-CrossPlatform.ps1
 
+# Run quick tests (recommended for first-time setup)
+.\Tests\Run-SimpleTests.ps1 -TestType Quick
+
+# Run all tests
+.\Tests\Run-SimpleTests.ps1 -TestType Full -ShowOutput Detailed
+```
+
+### Standard Pester Commands
+
+```powershell
 # Run complete test suite
 Invoke-Pester -Path Tests\HashSmith.Tests.ps1 -Output Detailed
 
-# Run with code coverage
-Invoke-Pester -Path Tests\HashSmith.Tests.ps1 -CodeCoverage "Modules\**\*.ps1" -Output Detailed
+# Run with code coverage (Windows recommended)
+.\Tests\HashSmith.PesterConfig.ps1 -WithCoverage
+
+# Run performance tests only
+.\Tests\Run-SimpleTests.ps1 -TestType Performance
 ```
 
 ### Run Specific Test Categories
 
 ```powershell
-# Run only unit tests
-Invoke-Pester -Path Tests\HashSmith.Tests.ps1 -Tag "Unit"
+# Unit tests only
+.\Tests\Run-SimpleTests.ps1 -TestType Unit
 
-# Run integration tests
-Invoke-Pester -Path Tests\HashSmith.Tests.ps1 -Tag "Integration"
+# Integration tests only  
+.\Tests\Run-SimpleTests.ps1 -TestType Integration
 
-# Run performance tests
-Invoke-Pester -Path Tests\HashSmith.Tests.ps1 -Tag "Performance"
-
-# Run specific module tests
-Invoke-Pester -Path Tests\HashSmith.Tests.ps1 -Tag "Config"
-Invoke-Pester -Path Tests\HashSmith.Tests.ps1 -Tag "Hash"
-Invoke-Pester -Path Tests\HashSmith.Tests.ps1 -Tag "Discovery"
+# Custom tags
+.\Tests\Run-SimpleTests.ps1 -Tag "Config","Core" -ShowOutput Detailed
 ```
 
 ### Run with Different Output Formats

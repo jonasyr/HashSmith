@@ -56,6 +56,7 @@ BeforeAll {
         MinThroughputMBps = 10  # Minimum acceptable throughput
         MaxMemoryUsageMB = 1000  # Maximum acceptable memory usage
         FileCountThreshold = 1000  # Files per second threshold
+        TempDir = if ($env:TEMP) { $env:TEMP } elseif ($env:TMPDIR) { $env:TMPDIR } else { '/tmp' }
     }
     
     # Create performance test environment
