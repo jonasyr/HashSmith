@@ -1,17 +1,10 @@
 <#
 .SYNOPSIS
-    Configuration and global variables management for HashSmith - ENHANCED WITH ATOMIC OPERATIONS
+    Configuration and global variables management for HashSmith - Simplified and Reliable
 
 .DESCRIPTION
     This module manages all configuration settings, global variables, and statistics
-    for the HashSmith file integrity verification system. 
-    
-    CRITICAL ENHANCEMENTS:
-    - Lock-free statistics using atomic operations for better performance
-    - Thread-safe concurrent data structures throughout
-    - Enhanced memory management and garbage collection
-    - Improved initialization with validation
-    - Performance monitoring and adaptive configuration
+    for the HashSmith file integrity verification system with simplified architecture.
 #>
 
 #region Module Variables
@@ -34,23 +27,20 @@ $Script:Config = @{
 # Modern HashSmith configuration (initialized by Initialize-HashSmithConfig)
 $Script:HashSmithConfig = $null
 
-# ENHANCED: Lock-free statistics with atomic operations for maximum performance
+# Simplified statistics with atomic operations
 $Script:Statistics = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
 $Script:AtomicCounters = [System.Collections.Concurrent.ConcurrentDictionary[string, long]]::new()
 
-# Thread-safe circuit breaker with atomic operations
+# Thread-safe circuit breaker
 $Script:CircuitBreaker = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
 
 # Atomic exit code handling
 $Script:ExitCode = [ref]0
 
-# Enhanced concurrent collections for better performance
+# Concurrent collections
 $Script:LogBatch = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
 $Script:NetworkConnections = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
 $Script:StructuredLogs = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
-
-# Performance monitoring
-$Script:PerformanceCounters = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
 
 #endregion
 
@@ -82,12 +72,12 @@ function Initialize-AtomicCounters {
         $Script:AtomicCounters.TryAdd($counter, $defaultCounters[$counter]) | Out-Null
     }
     
-    Write-Verbose "Initialized $($defaultCounters.Count) atomic counters for lock-free statistics"
+    Write-Verbose "Initialized $($defaultCounters.Count) atomic counters"
 }
 
 <#
 .SYNOPSIS
-    Initializes the statistics dictionary with enhanced thread-safe defaults
+    Initializes the statistics dictionary with thread-safe defaults
 #>
 function Initialize-Statistics {
     [CmdletBinding()]
@@ -98,7 +88,7 @@ function Initialize-Statistics {
     
     # Initialize the main statistics dictionary
     if ($null -eq $Script:Statistics -or $Script:Statistics -isnot [System.Collections.Concurrent.ConcurrentDictionary[string, object]]) {
-        Write-Verbose "Initializing enhanced Statistics ConcurrentDictionary"
+        Write-Verbose "Initializing Statistics ConcurrentDictionary"
         $Script:Statistics = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
     }
     
@@ -106,7 +96,6 @@ function Initialize-Statistics {
         StartTime = Get-Date
         DiscoveryErrors = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
         ProcessingErrors = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
-        PerformanceMetrics = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
         SystemLoad = @{
             CPU = 0
             Memory = 0
@@ -118,46 +107,12 @@ function Initialize-Statistics {
         $Script:Statistics.TryAdd($key, $defaultStats[$key]) | Out-Null
     }
     
-    # Initialize circuit breaker with atomic operations
+    # Initialize circuit breaker
     $Script:CircuitBreaker.TryAdd('FailureCount', 0) | Out-Null
     $Script:CircuitBreaker.TryAdd('LastFailureTime', $null) | Out-Null
     $Script:CircuitBreaker.TryAdd('IsOpen', $false) | Out-Null
     
-    Write-Verbose "Enhanced statistics initialization complete with atomic operations"
-}
-
-<#
-.SYNOPSIS
-    Updates performance metrics for adaptive optimization
-#>
-function Update-PerformanceMetrics {
-    [CmdletBinding()]
-    param(
-        [string]$Operation,
-        [double]$Duration,
-        [long]$BytesProcessed = 0
-    )
-    
-    $metrics = $Script:PerformanceCounters.GetOrAdd($Operation, {
-        @{
-            TotalOperations = 0
-            TotalDuration = 0.0
-            TotalBytes = 0
-            AverageRate = 0.0
-            LastUpdate = Get-Date
-        }
-    })
-    
-    # Atomic updates to performance metrics
-    $metrics.TotalOperations++
-    $metrics.TotalDuration += $Duration
-    $metrics.TotalBytes += $BytesProcessed
-    
-    if ($metrics.TotalDuration -gt 0) {
-        $metrics.AverageRate = $metrics.TotalBytes / $metrics.TotalDuration
-    }
-    
-    $metrics.LastUpdate = Get-Date
+    Write-Verbose "Statistics initialization complete"
 }
 
 #endregion
@@ -166,11 +121,7 @@ function Update-PerformanceMetrics {
 
 <#
 .SYNOPSIS
-    Initializes the HashSmith configuration system with enhanced validation
-
-.DESCRIPTION
-    Sets up the default configuration and applies any overrides with enhanced
-    validation, performance monitoring, and adaptive configuration.
+    Initializes the HashSmith configuration system
 
 .PARAMETER ConfigOverrides
     Optional hashtable of configuration overrides to apply
@@ -184,9 +135,9 @@ function Initialize-HashSmithConfig {
         [hashtable]$ConfigOverrides = @{}
     )
     
-    Write-Verbose "Initializing ENHANCED HashSmith configuration with validation"
+    Write-Verbose "Initializing HashSmith configuration"
     
-    # Initialize the configuration with enhanced defaults
+    # Initialize the configuration with defaults
     $Script:HashSmithConfig = @{
         Algorithm = 'MD5'
         TargetPath = $PWD.Path
@@ -212,12 +163,6 @@ function Initialize-HashSmithConfig {
         ExcludePatterns = @()
         MaxLogBatchSize = 100
         LogBatchInterval = 5000
-        # Enhanced configuration options
-        AdaptiveChunking = $true
-        DynamicThreading = $true
-        PerformanceMonitoring = $true
-        GracefulTermination = $true
-        MemoryManagement = $true
     }
     
     # Apply and validate overrides
@@ -226,7 +171,7 @@ function Initialize-HashSmithConfig {
             $oldValue = $Script:HashSmithConfig[$key]
             $newValue = $ConfigOverrides[$key]
             
-            # Enhanced validation
+            # Basic validation
             $isValid = switch ($key) {
                 'MaxParallelJobs' { $newValue -ge 1 -and $newValue -le 64 }
                 'ChunkSize' { $newValue -ge 50 -and $newValue -le 5000 }
@@ -238,7 +183,7 @@ function Initialize-HashSmithConfig {
             
             if ($isValid) {
                 $Script:HashSmithConfig[$key] = $newValue
-                Write-Verbose "Applied validated config override: $key = $oldValue → $newValue"
+                Write-Verbose "Applied config override: $key = $oldValue → $newValue"
             } else {
                 Write-Warning "Invalid configuration value for ${key}: $newValue (keeping $oldValue)"
             }
@@ -247,18 +192,15 @@ function Initialize-HashSmithConfig {
         }
     }
     
-    # Initialize enhanced thread-safe statistics
+    # Initialize thread-safe statistics
     Initialize-Statistics
     
-    Write-Verbose "Enhanced HashSmith configuration initialized with atomic operations and validation"
+    Write-Verbose "HashSmith configuration initialized"
 }
 
 <#
 .SYNOPSIS
-    Gets the current HashSmith configuration with thread safety
-
-.DESCRIPTION
-    Returns a safe copy of the current configuration hashtable
+    Gets the current HashSmith configuration
 
 .EXAMPLE
     $config = Get-HashSmithConfig
@@ -278,11 +220,7 @@ function Get-HashSmithConfig {
 
 <#
 .SYNOPSIS
-    Gets current statistics with enhanced lock-free access
-
-.DESCRIPTION
-    Returns current statistics using atomic operations for maximum performance
-    and thread safety without locks.
+    Gets current statistics with lock-free access
 
 .EXAMPLE
     $stats = Get-HashSmithStatistics
@@ -321,16 +259,9 @@ function Get-HashSmithStatistics {
             }
         }
         
-        # Add performance metrics
-        $perfMetrics = @{}
-        foreach ($kvp in $Script:PerformanceCounters.GetEnumerator()) {
-            $perfMetrics[$kvp.Key] = $kvp.Value
-        }
-        $result['PerformanceCounters'] = $perfMetrics
-        
     }
     catch {
-        Write-Warning "Error accessing enhanced statistics: $($_.Exception.Message)"
+        Write-Warning "Error accessing statistics: $($_.Exception.Message)"
         return @{}
     }
     
@@ -339,10 +270,7 @@ function Get-HashSmithStatistics {
 
 <#
 .SYNOPSIS
-    Gets circuit breaker state with atomic operations
-
-.DESCRIPTION
-    Returns the current circuit breaker state using lock-free operations
+    Gets circuit breaker state
 
 .EXAMPLE
     $breaker = Get-HashSmithCircuitBreaker
@@ -372,10 +300,7 @@ function Get-HashSmithCircuitBreaker {
 
 <#
 .SYNOPSIS
-    Gets the current exit code using atomic operations
-
-.DESCRIPTION
-    Returns the current exit code with thread safety
+    Gets the current exit code
 
 .EXAMPLE
     $exitCode = Get-HashSmithExitCode
@@ -390,10 +315,7 @@ function Get-HashSmithExitCode {
 
 <#
 .SYNOPSIS
-    Sets the HashSmith exit code with atomic operations
-
-.DESCRIPTION
-    Sets the exit code using atomic compare-and-swap to prevent race conditions
+    Sets the HashSmith exit code
 
 .PARAMETER ExitCode
     The exit code to set
@@ -414,10 +336,7 @@ function Set-HashSmithExitCode {
 
 <#
 .SYNOPSIS
-    Gets the log batch queue with enhanced initialization
-
-.DESCRIPTION
-    Returns the current log batch queue with thread-safe access
+    Gets the log batch queue
 
 .EXAMPLE
     $logBatch = Get-HashSmithLogBatch
@@ -427,7 +346,7 @@ function Get-HashSmithLogBatch {
     [OutputType([System.Collections.Concurrent.ConcurrentQueue[string]])]
     param()
     
-    # Initialize if null with thread safety
+    # Initialize if null
     if ($null -eq $Script:LogBatch) {
         $newQueue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
         $Script:LogBatch = $newQueue
@@ -439,9 +358,6 @@ function Get-HashSmithLogBatch {
 <#
 .SYNOPSIS
     Gets the network connections cache
-
-.DESCRIPTION
-    Returns the current network connections cache with thread safety
 
 .EXAMPLE
     $connections = Get-HashSmithNetworkConnections
@@ -458,9 +374,6 @@ function Get-HashSmithNetworkConnections {
 .SYNOPSIS
     Gets the structured logs collection
 
-.DESCRIPTION
-    Returns the current structured logs as an array
-
 .EXAMPLE
     $logs = Get-HashSmithStructuredLogs
 #>
@@ -474,10 +387,7 @@ function Get-HashSmithStructuredLogs {
 
 <#
 .SYNOPSIS
-    Adds a structured log entry with thread safety
-
-.DESCRIPTION
-    Adds an entry to the structured logs collection using atomic operations
+    Adds a structured log entry
 
 .PARAMETER LogEntry
     The log entry to add
@@ -492,7 +402,7 @@ function Add-HashSmithStructuredLog {
         [hashtable]$LogEntry
     )
     
-    # Enhance log entry with additional metadata
+    # Enhance log entry with metadata
     $enhancedEntry = $LogEntry.Clone()
     $enhancedEntry['ThreadId'] = [System.Threading.Thread]::CurrentThread.ManagedThreadId
     $enhancedEntry['ProcessId'] = $PID
@@ -503,10 +413,7 @@ function Add-HashSmithStructuredLog {
 
 <#
 .SYNOPSIS
-    Resets statistics with enhanced atomic operations
-
-.DESCRIPTION
-    Resets all statistics counters using lock-free atomic operations
+    Resets statistics with atomic operations
 
 .EXAMPLE
     Reset-HashSmithStatistics
@@ -517,32 +424,25 @@ function Reset-HashSmithStatistics {
     
     Write-Verbose "Resetting statistics with atomic operations"
     
-    # Reset atomic counters using atomic exchange
+    # Reset atomic counters
     foreach ($counter in $Script:AtomicCounters.Keys) {
         [System.Threading.Interlocked]::Exchange([ref]$Script:AtomicCounters[$counter], 0) | Out-Null
     }
     
-    # Clear concurrent collections safely
+    # Clear concurrent collections
     if ($null -ne $Script:Statistics) {
         $Script:Statistics.Clear()
-    }
-    
-    if ($null -ne $Script:PerformanceCounters) {
-        $Script:PerformanceCounters.Clear()
     }
     
     # Reinitialize with defaults
     Initialize-Statistics
     
-    Write-Verbose "Statistics reset complete with atomic operations"
+    Write-Verbose "Statistics reset complete"
 }
 
 <#
 .SYNOPSIS
     Updates a specific statistic using atomic operations
-
-.DESCRIPTION
-    Sets a statistic value using lock-free atomic operations for maximum performance
 
 .PARAMETER Name
     The name of the statistic to update
@@ -582,9 +482,6 @@ function Set-HashSmithStatistic {
 <#
 .SYNOPSIS
     Increments a statistic using atomic operations
-
-.DESCRIPTION
-    Atomically increments a counter for lock-free thread safety
 
 .PARAMETER Name
     The name of the statistic to increment
@@ -629,10 +526,7 @@ function Add-HashSmithStatistic {
 
 <#
 .SYNOPSIS
-    Sets a configuration value with enhanced validation
-
-.DESCRIPTION
-    Sets a specific configuration value with validation and performance monitoring
+    Sets a configuration value with validation
 
 .PARAMETER Key
     The configuration key to set
@@ -653,7 +547,7 @@ function Set-HashSmithConfig {
         $Value
     )
     
-    # Enhanced validation
+    # Basic validation
     $isValid = $true
     $validationMessage = ""
     
@@ -687,7 +581,7 @@ function Set-HashSmithConfig {
     if ($null -ne $Script:HashSmithConfig) {
         $oldValue = $Script:HashSmithConfig[$Key]
         $Script:HashSmithConfig[$Key] = $Value
-        Write-Verbose "Configuration updated with validation: $Key = $oldValue → $Value"
+        Write-Verbose "Configuration updated: $Key = $oldValue → $Value"
     } else {
         $Script:Config[$Key] = $Value
         Write-Verbose "Legacy configuration updated: $Key = $Value"
@@ -696,11 +590,7 @@ function Set-HashSmithConfig {
 
 <#
 .SYNOPSIS
-    Gets optimal buffer size with enhanced algorithm-specific optimization
-
-.DESCRIPTION
-    Returns optimized buffer size based on hash algorithm performance characteristics,
-    file size, and system capabilities for improved performance.
+    Gets optimal buffer size based on algorithm and file size
 
 .PARAMETER Algorithm
     The hash algorithm being used
@@ -723,7 +613,7 @@ function Get-HashSmithOptimalBufferSize {
         [long]$FileSize
     )
     
-    # Enhanced algorithm-specific optimal buffer sizes based on performance testing
+    # Algorithm-specific optimal buffer sizes
     $algorithmBuffers = @{
         'MD5'    = @{ Small = 64KB; Medium = 128KB; Large = 256KB; VeryLarge = 512KB }
         'SHA1'   = @{ Small = 32KB; Medium = 64KB;  Large = 128KB; VeryLarge = 256KB }
@@ -733,7 +623,7 @@ function Get-HashSmithOptimalBufferSize {
     
     $buffers = $algorithmBuffers[$Algorithm]
     
-    # Enhanced file size classification with very large file support
+    # File size classification
     if ($FileSize -lt 1MB) {
         return $buffers.Small
     } elseif ($FileSize -lt 100MB) {
@@ -741,63 +631,13 @@ function Get-HashSmithOptimalBufferSize {
     } elseif ($FileSize -lt 1GB) {
         return $buffers.Large
     } else {
-        # Very large files get the largest buffer for streaming efficiency
         return $buffers.VeryLarge
     }
 }
 
-<#
-.SYNOPSIS
-    Gets performance metrics for monitoring and optimization
-
-.DESCRIPTION
-    Returns current performance metrics for analysis and adaptive optimization
-
-.EXAMPLE
-    $metrics = Get-HashSmithPerformanceMetrics
-#>
-function Get-HashSmithPerformanceMetrics {
-    [CmdletBinding()]
-    [OutputType([hashtable])]
-    param()
-    
-    $result = @{}
-    
-    foreach ($kvp in $Script:PerformanceCounters.GetEnumerator()) {
-        $result[$kvp.Key] = $kvp.Value
-    }
-    
-    # Add system performance metrics
-    try {
-        $result['SystemMemory'] = @{
-            Used = [System.GC]::GetTotalMemory($false)
-            Collections = @{
-                Gen0 = [System.GC]::CollectionCount(0)
-                Gen1 = [System.GC]::CollectionCount(1)
-                Gen2 = [System.GC]::CollectionCount(2)
-            }
-        }
-        
-        $result['ThreadPool'] = @{
-            AvailableWorkerThreads = 0
-            AvailableIOThreads = 0
-        }
-        
-        [System.Threading.ThreadPool]::GetAvailableThreads(
-            [ref]$result['ThreadPool'].AvailableWorkerThreads,
-            [ref]$result['ThreadPool'].AvailableIOThreads
-        )
-    }
-    catch {
-        Write-Warning "Could not retrieve system performance metrics: $($_.Exception.Message)"
-    }
-    
-    return $result
-}
-
 #endregion
 
-# Initialize enhanced statistics on module load
+# Initialize statistics on module load
 Initialize-Statistics
 
 # Export public functions
@@ -816,8 +656,7 @@ Export-ModuleMember -Function @(
     'Set-HashSmithStatistic',
     'Add-HashSmithStatistic',
     'Set-HashSmithConfig',
-    'Get-HashSmithOptimalBufferSize',
-    'Get-HashSmithPerformanceMetrics'
+    'Get-HashSmithOptimalBufferSize'
 )
 
 # Export variables that need to be accessible

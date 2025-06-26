@@ -1,90 +1,22 @@
 <#
 .SYNOPSIS
-    Core utilities and helper functions for HashSmith - ENHANCED WITH THREAD SAFETY
+    Core utilities and helper functions for HashSmith - Simplified and Reliable
 
 .DESCRIPTION
-    This module provides enhanced core utility functions including:
+    This module provides core utility functions including:
     - Thread-safe logging with atomic operations
-    - Improved circuit breaker with lock-free implementation
-    - Enhanced network monitoring with automatic failover
+    - Simple circuit breaker implementation
+    - Network monitoring with automatic failover
     - Graceful termination handling with proper cleanup
     - Performance-optimized file operations
-    - Real-time system monitoring and adaptive behavior
 #>
 
-# Script-level variables for enhanced functionality
+# Script-level variables
 $Script:NetworkMonitorRunning = $false
 $Script:CircuitBreakerLock = [System.Object]::new()
 $Script:TerminationHandlers = [System.Collections.Concurrent.ConcurrentBag[scriptblock]]::new()
-$Script:SystemMonitor = $null
 
-#region Enhanced System Monitoring
-
-<#
-.SYNOPSIS
-    Monitors system resources for adaptive behavior
-#>
-function Start-SystemResourceMonitor {
-    [CmdletBinding()]
-    param()
-    
-    if ($Script:SystemMonitor) { return }
-    
-    $Script:SystemMonitor = Start-Job -ScriptBlock {
-        while ($true) {
-            try {
-                # Monitor memory usage
-                $memoryUsage = [System.GC]::GetTotalMemory($false)
-                $generation0 = [System.GC]::CollectionCount(0)
-                $generation1 = [System.GC]::CollectionCount(1)
-                $generation2 = [System.GC]::CollectionCount(2)
-                
-                # Get thread pool info
-                $availableWorkerThreads = 0
-                $availableIOThreads = 0
-                [System.Threading.ThreadPool]::GetAvailableThreads([ref]$availableWorkerThreads, [ref]$availableIOThreads)
-                
-                # Adaptive garbage collection
-                if ($memoryUsage -gt 500MB) {
-                    [System.GC]::Collect(0)  # Minor collection
-                }
-                
-                if ($memoryUsage -gt 1GB) {
-                    [System.GC]::Collect()   # Full collection
-                    [System.GC]::WaitForPendingFinalizers()
-                }
-                
-                Start-Sleep -Seconds 30
-            }
-            catch {
-                # Silent monitoring - don't disrupt main processing
-                Start-Sleep -Seconds 60
-            }
-        }
-    }
-    
-    Write-HashSmithLog -Message "System resource monitoring started" -Level DEBUG -Component 'SYSTEM'
-}
-
-<#
-.SYNOPSIS
-    Stops system resource monitoring
-#>
-function Stop-SystemResourceMonitor {
-    [CmdletBinding()]
-    param()
-    
-    if ($Script:SystemMonitor) {
-        Stop-Job $Script:SystemMonitor -ErrorAction SilentlyContinue
-        Remove-Job $Script:SystemMonitor -Force -ErrorAction SilentlyContinue
-        $Script:SystemMonitor = $null
-        Write-HashSmithLog -Message "System resource monitoring stopped" -Level DEBUG -Component 'SYSTEM'
-    }
-}
-
-#endregion
-
-#region Enhanced Termination Handling
+#region Termination Handling
 
 <#
 .SYNOPSIS
@@ -126,11 +58,7 @@ function Invoke-TerminationHandlers {
 
 <#
 .SYNOPSIS
-    Writes enhanced log messages with atomic operations and improved performance
-
-.DESCRIPTION
-    Provides high-performance logging with optimized color coding, thread safety,
-    and structured logging for JSON output. Enhanced with atomic operations.
+    Writes log messages with atomic operations and improved performance
 
 .PARAMETER Message
     The message to log
@@ -179,7 +107,7 @@ function Write-HashSmithLog {
     $config = Get-HashSmithConfig
     $timestamp = Get-Date -Format $config.DateFormat
     
-    # Enhanced emoji/symbol prefixes with better visual distinction
+    # Emoji/symbol prefixes
     $prefix = switch ($Level) {
         'DEBUG'    { "🔍" }
         'INFO'     { "ℹ️ " }
@@ -192,7 +120,7 @@ function Write-HashSmithLog {
         default    { "•" }
     }
     
-    # High-contrast color scheme optimized for readability
+    # Color scheme
     $colorMap = @{
         'DEBUG'    = 'DarkGray'
         'INFO'     = 'Cyan'
@@ -204,7 +132,7 @@ function Write-HashSmithLog {
         'STATS'    = 'Green'
     }
     
-    # Format the log entry with optimized string operations
+    # Format the log entry
     $logEntry = if ($NoTimestamp) {
         "$prefix $Message"
     } else {
@@ -212,10 +140,9 @@ function Write-HashSmithLog {
         "[$timestamp] $prefix $componentTag$Message"
     }
     
-    # Atomic output operations to prevent interleaved log messages
+    # Atomic output operations
     $color = $colorMap[$Level]
     if ($color) {
-        # Use Write-Host with proper synchronization
         [System.Threading.Monitor]::Enter($Script:CircuitBreakerLock)
         try {
             Write-Host $logEntry -ForegroundColor $color
@@ -229,7 +156,7 @@ function Write-HashSmithLog {
     
     Write-Verbose $logEntry
     
-    # Enhanced structured logging with performance optimization
+    # Structured logging
     if ($UseJsonLog -and $Level -in @('WARN', 'ERROR')) {
         $structuredEntry = @{
             Timestamp = $timestamp
@@ -249,11 +176,7 @@ function Write-HashSmithLog {
 
 <#
 .SYNOPSIS
-    Enhanced network monitoring with automatic failover and recovery
-
-.DESCRIPTION
-    Provides resilient network monitoring with intelligent retry logic,
-    automatic failover detection, and performance optimization.
+    Network monitoring with automatic failover and recovery
 
 .PARAMETER ServerName
     Network server to monitor
@@ -287,18 +210,18 @@ function Start-HashSmithNetworkMonitor {
     
     $Script:NetworkMonitorRunning = $true
     
-    # Enhanced monitoring with exponential backoff and circuit breaker
+    # Simple monitoring with exponential backoff
     $monitorJob = Start-Job -ScriptBlock {
         param($ServerName, $OnDisconnectAction, $IntervalSeconds, $TimeoutMs)
         
         $consecutiveFailures = 0
         $maxFailures = 3
         $backoffMultiplier = 1
-        $maxBackoff = 300  # 5 minutes max
+        $maxBackoff = 300
         
         while ($using:NetworkMonitorRunning) {
             try {
-                # Enhanced connectivity test with timeout
+                # Simple connectivity test
                 $tcpClient = [System.Net.Sockets.TcpClient]::new()
                 $connectTask = $tcpClient.ConnectAsync($ServerName, 445)
                 
@@ -307,7 +230,6 @@ function Start-HashSmithNetworkMonitor {
                     $tcpClient.Close()
                     
                     if ($connected) {
-                        # Reset on successful connection
                         $consecutiveFailures = 0
                         $backoffMultiplier = 1
                     } else {
@@ -345,16 +267,13 @@ function Start-HashSmithNetworkMonitor {
         Stop-HashSmithNetworkMonitor
     }
     
-    Write-HashSmithLog -Message "Enhanced network monitoring started for $ServerName" -Level DEBUG -Component 'NETWORK'
+    Write-HashSmithLog -Message "Network monitoring started for $ServerName" -Level DEBUG -Component 'NETWORK'
     return $monitorJob
 }
 
 <#
 .SYNOPSIS
     Stops network monitoring with proper cleanup
-
-.DESCRIPTION
-    Cleanly stops network monitoring and cleans up resources
 
 .EXAMPLE
     Stop-HashSmithNetworkMonitor
@@ -365,7 +284,7 @@ function Stop-HashSmithNetworkMonitor {
     
     $Script:NetworkMonitorRunning = $false
     
-    # Enhanced cleanup
+    # Cleanup
     Get-Job | Where-Object { $_.Name -like "*NetworkMonitor*" -or $_.State -eq 'Running' } | ForEach-Object {
         Stop-Job $_ -ErrorAction SilentlyContinue
         Remove-Job $_ -Force -ErrorAction SilentlyContinue
@@ -376,11 +295,7 @@ function Stop-HashSmithNetworkMonitor {
 
 <#
 .SYNOPSIS
-    Tests network path connectivity with enhanced caching and performance
-
-.DESCRIPTION
-    Tests connectivity to network paths with intelligent caching, performance
-    optimization, and automatic retry logic.
+    Tests network path connectivity with caching and performance
 
 .PARAMETER Path
     The network path to test
@@ -408,7 +323,7 @@ function Test-HashSmithNetworkPath {
     $serverName = $matches[1]
     $networkConnections = Get-HashSmithNetworkConnections
     
-    # Enhanced caching with performance optimization
+    # Caching
     if ($UseCache -and $networkConnections.ContainsKey($serverName)) {
         $cached = $networkConnections[$serverName]
         if (((Get-Date) - $cached.Timestamp).TotalMinutes -lt 2 -and $cached.IsAlive) {
@@ -416,27 +331,26 @@ function Test-HashSmithNetworkPath {
         }
     }
     
-    Write-HashSmithLog -Message "Testing enhanced network connectivity to $serverName" -Level DEBUG -Component 'NETWORK'
+    Write-HashSmithLog -Message "Testing network connectivity to $serverName" -Level DEBUG -Component 'NETWORK'
     
     try {
-        # Enhanced connectivity test with multiple methods
         $result = $false
         
-        # Method 1: Fast TCP connection test
+        # TCP connection test
         try {
             $tcpClient = [System.Net.Sockets.TcpClient]::new()
             $connectTask = $tcpClient.ConnectAsync($serverName, 445)
             
-            if ($connectTask.Wait(3000)) {  # 3 second timeout
+            if ($connectTask.Wait(3000)) {
                 $result = $tcpClient.Connected
                 $tcpClient.Close()
             }
         }
         catch {
-            # Fall back to PowerShell method
+            # Fall back to Test-NetConnection if available
         }
         
-        # Method 2: Fallback to Test-NetConnection if available
+        # Fallback method
         if (-not $result) {
             try {
                 $result = Test-NetConnection -ComputerName $serverName -Port 445 -InformationLevel Quiet -WarningAction SilentlyContinue -ErrorAction Stop
@@ -446,11 +360,11 @@ function Test-HashSmithNetworkPath {
             }
         }
         
-        # Enhanced caching with atomic operations
+        # Cache the result
         $cacheEntry = @{
             IsAlive = $result
             Timestamp = Get-Date
-            TestMethod = if ($result) { "Enhanced" } else { "Failed" }
+            TestMethod = if ($result) { "Success" } else { "Failed" }
         }
         $networkConnections[$serverName] = $cacheEntry
         
@@ -473,10 +387,7 @@ function Test-HashSmithNetworkPath {
 
 <#
 .SYNOPSIS
-    Updates circuit breaker state with enhanced thread safety and lock-free operations
-
-.DESCRIPTION
-    Manages circuit breaker pattern with improved atomic operations and performance
+    Updates circuit breaker state with thread safety
 
 .PARAMETER IsFailure
     Whether the operation was a failure
@@ -499,7 +410,7 @@ function Update-HashSmithCircuitBreaker {
     $config = Get-HashSmithConfig
     $circuitBreaker = Get-HashSmithCircuitBreaker
     
-    # Enhanced thread-safe update with minimal locking
+    # Thread-safe update
     [System.Threading.Monitor]::Enter($Script:CircuitBreakerLock)
     try {
         if ($IsFailure) {
@@ -510,12 +421,9 @@ function Update-HashSmithCircuitBreaker {
             if ($newCount -ge $config.CircuitBreakerThreshold) {
                 $circuitBreaker.IsOpen = $true
                 Write-HashSmithLog -Message "Circuit breaker opened after $newCount failures" -Level ERROR -Component $Component
-                
-                # Trigger system resource monitoring if not already running
-                Start-SystemResourceMonitor
             }
         } else {
-            # Enhanced recovery logic
+            # Recovery logic
             if ($circuitBreaker.IsOpen -and 
                 $circuitBreaker.LastFailureTime -and
                 ((Get-Date) - $circuitBreaker.LastFailureTime).TotalSeconds -gt $config.CircuitBreakerTimeout) {
@@ -526,7 +434,7 @@ function Update-HashSmithCircuitBreaker {
             }
         }
         
-        # Update the global circuit breaker state atomically
+        # Update the global circuit breaker state
         $globalBreaker = Get-HashSmithCircuitBreaker
         foreach ($key in $circuitBreaker.Keys) {
             $globalBreaker[$key] = $circuitBreaker[$key]
@@ -539,11 +447,7 @@ function Update-HashSmithCircuitBreaker {
 
 <#
 .SYNOPSIS
-    Tests circuit breaker state with enhanced performance
-
-.DESCRIPTION
-    Checks if operations should proceed based on circuit breaker state with
-    optimized performance and reduced locking.
+    Tests circuit breaker state
 
 .PARAMETER Component
     The component name for categorization
@@ -561,7 +465,7 @@ function Test-HashSmithCircuitBreaker {
     $config = Get-HashSmithConfig
     $circuitBreaker = Get-HashSmithCircuitBreaker
     
-    # Lock-free read for better performance
+    # Lock-free read
     if ($circuitBreaker.IsOpen) {
         $timeSinceFailure = if ($circuitBreaker.LastFailureTime) {
             (Get-Date) - $circuitBreaker.LastFailureTime
@@ -580,11 +484,7 @@ function Test-HashSmithCircuitBreaker {
 
 <#
 .SYNOPSIS
-    Normalizes file paths with enhanced Unicode and long path support
-
-.DESCRIPTION
-    Normalizes paths with improved error handling, performance optimization,
-    and enhanced long path support.
+    Normalizes file paths with Unicode and long path support
 
 .PARAMETER Path
     The path to normalize
@@ -601,19 +501,19 @@ function Get-HashSmithNormalizedPath {
     )
     
     try {
-        # Enhanced Unicode normalization with performance optimization
+        # Unicode normalization
         $normalizedPath = [System.IO.Path]::GetFullPath($Path.Normalize([System.Text.NormalizationForm]::FormC))
         
         $config = Get-HashSmithConfig
         
-        # Enhanced long path support with better detection
+        # Long path support
         if ($config.SupportLongPaths -and 
             $normalizedPath.Length -gt 260 -and 
             -not $normalizedPath.StartsWith('\\?\')) {
             
             Add-HashSmithStatistic -Name 'LongPaths' -Amount 1
             
-            # Enhanced long-UNC path handling with validation
+            # Long-UNC path handling
             if ($normalizedPath -match '^[\\\\]{2}[^\\]+\\') {
                 # UNC path (\\server\share) - convert to \\?\UNC\server\share
                 $uncPath = "\\?\UNC\" + $normalizedPath.Substring(2)
@@ -637,11 +537,7 @@ function Get-HashSmithNormalizedPath {
 
 <#
 .SYNOPSIS
-    Tests file accessibility with enhanced timeout and performance
-
-.DESCRIPTION
-    Tests file accessibility with improved timeout handling, retry logic,
-    and performance optimization.
+    Tests file accessibility with timeout and performance
 
 .PARAMETER Path
     The file path to test
@@ -674,7 +570,7 @@ function Test-HashSmithFileAccessible {
         try {
             $normalizedPath = Get-HashSmithNormalizedPath -Path $Path
             
-            # Enhanced file access with better sharing options and performance
+            # File access test
             $fileStream = [System.IO.File]::Open($normalizedPath, 'Open', 'Read', 'ReadWrite')
             $fileStream.Close()
             
@@ -691,7 +587,7 @@ function Test-HashSmithFileAccessible {
                 Update-HashSmithCircuitBreaker -IsFailure:$true -Component 'FILE'
                 return $false
             }
-            # Adaptive sleep based on attempt count
+            # Adaptive sleep
             $sleepMs = [Math]::Min(50 * $attemptCount, 500)
             Start-Sleep -Milliseconds $sleepMs
         }
@@ -705,11 +601,7 @@ function Test-HashSmithFileAccessible {
 
 <#
 .SYNOPSIS
-    Tests if a file is a symbolic link with enhanced performance
-
-.DESCRIPTION
-    Detects symbolic links and reparse points with improved performance
-    and error handling.
+    Tests if a file is a symbolic link
 
 .PARAMETER Path
     The file path to test
@@ -726,7 +618,7 @@ function Test-HashSmithSymbolicLink {
     )
     
     try {
-        # Enhanced performance with direct attribute checking
+        # Direct attribute checking
         $attributes = [System.IO.File]::GetAttributes($Path)
         $isReparse = ($attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint
         
@@ -746,11 +638,7 @@ function Test-HashSmithSymbolicLink {
 
 <#
 .SYNOPSIS
-    Gets file integrity snapshot with enhanced metadata
-
-.DESCRIPTION
-    Captures file metadata for integrity verification with enhanced performance
-    and additional security attributes.
+    Gets file integrity snapshot
 
 .PARAMETER Path
     The file path to snapshot
@@ -776,7 +664,6 @@ function Get-HashSmithFileIntegritySnapshot {
             Attributes = $fileInfo.Attributes
             LastAccessTime = $fileInfo.LastAccessTime
             IsReadOnly = $fileInfo.IsReadOnly
-            # Enhanced snapshot with checksum for critical validation
             SnapshotTime = Get-Date
             PathHash = $Path.GetHashCode()
         }
@@ -789,10 +676,7 @@ function Get-HashSmithFileIntegritySnapshot {
 
 <#
 .SYNOPSIS
-    Tests integrity snapshot matching with enhanced precision
-
-.DESCRIPTION
-    Compares file integrity snapshots with improved accuracy and performance
+    Tests integrity snapshot matching
 
 .PARAMETER Snapshot1
     First snapshot to compare
@@ -815,7 +699,7 @@ function Test-HashSmithFileIntegrityMatch {
         return $false
     }
     
-    # Enhanced comparison with more attributes and precision
+    # Compare key attributes
     return ($Snapshot1.Size -eq $Snapshot2.Size -and
             $Snapshot1.LastWriteTimeUtc -eq $Snapshot2.LastWriteTimeUtc -and
             $Snapshot1.Attributes -eq $Snapshot2.Attributes -and
@@ -825,20 +709,20 @@ function Test-HashSmithFileIntegrityMatch {
 
 #endregion
 
-#region Enhanced Spinner Functionality
+#region Spinner Functionality
 
 <#
 .SYNOPSIS
-    Shows professional spinner with enhanced performance and no background bleeding
-
-.DESCRIPTION
-    Shows a clean, professional spinner with optimized performance and proper cleanup
+    Shows professional spinner with proper console management
 
 .PARAMETER Message
     The message to display
 
 .PARAMETER Seconds
     How long to show the spinner
+
+.PARAMETER UseProgress
+    Show as progress rather than spinner
 
 .EXAMPLE
     Show-HashSmithSpinner -Message "Processing large file..." -Seconds 5
@@ -847,10 +731,11 @@ function Show-HashSmithSpinner {
     [CmdletBinding()]
     param(
         [string]$Message = "Processing...",
-        [int]$Seconds = 3
+        [int]$Seconds = 3,
+        [switch]$UseProgress
     )
     
-    # Enhanced spinner characters for better visual appeal
+    # Spinner characters
     $chars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
     $endTime = (Get-Date).AddSeconds($Seconds)
     $i = 0
@@ -859,24 +744,32 @@ function Show-HashSmithSpinner {
         while ((Get-Date) -lt $endTime) {
             $char = $chars[$i % $chars.Length]
             
-            # Atomic output to prevent corruption
+            # Ensure message fits in console width
+            $displayMessage = if ($Message.Length -gt 80) {
+                $Message.Substring(0, 77) + "..."
+            } else {
+                $Message
+            }
+            
+            # Atomic output with proper clearing
             [System.Threading.Monitor]::Enter($Script:CircuitBreakerLock)
             try {
-                Write-Host "`r$char $Message" -NoNewline -ForegroundColor Cyan
+                Write-Host ("`r" + (" " * 100) + "`r") -NoNewline
+                Write-Host "$char $displayMessage" -NoNewline -ForegroundColor Cyan
             }
             finally {
                 [System.Threading.Monitor]::Exit($Script:CircuitBreakerLock)
             }
             
-            Start-Sleep -Milliseconds 120  # Optimized timing
+            Start-Sleep -Milliseconds 120
             $i++
         }
     }
     finally {
-        # Enhanced cleanup with proper spacing
+        # Cleanup with proper clearing
         [System.Threading.Monitor]::Enter($Script:CircuitBreakerLock)
         try {
-            Write-Host "`r$(' ' * ($Message.Length + 10))`r" -NoNewline
+            Write-Host ("`r" + (" " * 100) + "`r") -NoNewline
         }
         finally {
             [System.Threading.Monitor]::Exit($Script:CircuitBreakerLock)
@@ -886,10 +779,7 @@ function Show-HashSmithSpinner {
 
 <#
 .SYNOPSIS
-    Shows enhanced file spinner with real-time performance metrics
-
-.DESCRIPTION
-    Displays professional spinner with current file and enhanced progress information
+    Shows file spinner with real-time performance metrics
 
 .PARAMETER CurrentFile
     The current file being processed
@@ -903,6 +793,9 @@ function Show-HashSmithSpinner {
 .PARAMETER ChunkInfo
     Information about the current chunk
 
+.PARAMETER NoNewLine
+    Don't add a newline, for continuous updates
+
 .EXAMPLE
     Show-HashSmithFileSpinner -CurrentFile "largefile.zip" -TotalFiles 1000 -ProcessedFiles 250
 #>
@@ -912,25 +805,25 @@ function Show-HashSmithFileSpinner {
         [string]$CurrentFile = "Processing...",
         [int]$TotalFiles = 0,
         [int]$ProcessedFiles = 0,
-        [string]$ChunkInfo = ""
+        [string]$ChunkInfo = "",
+        [switch]$NoNewLine
     )
     
-    # Enhanced spinner with performance metrics
+    # Spinner with performance metrics
     $chars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
     $char = $chars[(Get-Date).Millisecond % $chars.Length]
     
-    # Smart file name truncation with better visual appeal
-    $displayFile = if ($CurrentFile.Length -gt 40) {
-        "..." + $CurrentFile.Substring($CurrentFile.Length - 37)
+    # Smart file name truncation
+    $displayFile = if ($CurrentFile.Length -gt 35) {
+        "..." + $CurrentFile.Substring($CurrentFile.Length - 32)
     } else {
         $CurrentFile
     }
     
-    # Enhanced progress formatting with performance metrics
+    # Progress formatting
     $progress = if ($TotalFiles -gt 0) {
         $percent = [Math]::Round(($ProcessedFiles / $TotalFiles) * 100, 1)
         $rate = if ($ProcessedFiles -gt 0) {
-            # Calculate rough processing rate
             $stats = Get-HashSmithStatistics
             if ($stats.StartTime) {
                 $elapsed = (Get-Date) - $stats.StartTime
@@ -954,10 +847,21 @@ function Show-HashSmithFileSpinner {
     $chunkDisplay = if ($ChunkInfo) { "[$ChunkInfo] " } else { "" }
     $message = "$char $chunkDisplay$displayFile $progress"
     
-    # Atomic output with enhanced cleanup
+    # Ensure the message fits in a reasonable width
+    if ($message.Length -gt 100) {
+        $message = $message.Substring(0, 97) + "..."
+    }
+    
+    # Atomic output with proper clearing
     [System.Threading.Monitor]::Enter($Script:CircuitBreakerLock)
     try {
-        Write-Host "`r$(' ' * 120)`r$message" -NoNewline -ForegroundColor Cyan
+        # Clear the current line completely, then write new message
+        Write-Host ("`r" + (" " * 120) + "`r") -NoNewline
+        if ($NoNewLine) {
+            Write-Host $message -NoNewline -ForegroundColor Cyan
+        } else {
+            Write-Host $message -ForegroundColor Cyan
+        }
     }
     finally {
         [System.Threading.Monitor]::Exit($Script:CircuitBreakerLock)
@@ -966,60 +870,154 @@ function Show-HashSmithFileSpinner {
 
 <#
 .SYNOPSIS
-    Clears the file spinner with enhanced cleanup
+    Clears the file spinner and any console artifacts
 
-.DESCRIPTION
-    Properly clears the spinner line with atomic operations
+.PARAMETER Force
+    Force clear multiple lines if needed
+
+.EXAMPLE
+    Clear-HashSmithFileSpinner
 #>
 function Clear-HashSmithFileSpinner {
     [CmdletBinding()]
-    param()
+    param(
+        [switch]$Force
+    )
     
     [System.Threading.Monitor]::Enter($Script:CircuitBreakerLock)
     try {
-        Write-Host "`r$(' ' * 120)`r" -NoNewline
+        if ($Force) {
+            # Clear multiple lines for complex displays
+            Write-Host ("`r" + (" " * 120) + "`r") -NoNewline
+            Write-Host ("`r" + (" " * 120) + "`r") -NoNewline
+            Write-Host ("`r" + (" " * 120) + "`r") -NoNewline
+        } else {
+            # Standard single line clear
+            Write-Host ("`r" + (" " * 120) + "`r") -NoNewline
+        }
     }
     finally {
         [System.Threading.Monitor]::Exit($Script:CircuitBreakerLock)
     }
 }
 
-# Legacy compatibility functions with enhanced performance
-function Start-HashSmithSpinner {
-    [CmdletBinding()]
-    param([string]$Message = "Processing...")
-    Write-Verbose "Enhanced spinner started: $Message"
-}
+#region Console Output Coordination
 
-function Stop-HashSmithSpinner {
-    [CmdletBinding()]
-    param()
-    Write-Verbose "Enhanced spinner stopped"
-}
+<#
+.SYNOPSIS
+    Safely writes progress information without interfering with other output
 
-function Update-HashSmithSpinner {
-    [CmdletBinding()]
-    param([string]$Message = "Processing...")
-    Write-Verbose "Enhanced spinner updated: $Message"
-}
+.PARAMETER Message
+    The progress message to display
 
-function Show-HashSmithSpinnerDemo {
+.PARAMETER NoSpinner
+    Don't show spinner character
+
+.PARAMETER Color
+    Text color
+
+.PARAMETER UseNewLine
+    Use a new line instead of overwriting current line
+
+.EXAMPLE
+    Write-HashSmithProgress -Message "Processing file 10/100" -Color Yellow
+#>
+function Write-HashSmithProgress {
     [CmdletBinding()]
     param(
-        [string]$Message = "Processing...",
-        [int]$Seconds = 3
+        [Parameter(Mandatory)]
+        [string]$Message,
+        
+        [switch]$NoSpinner,
+        
+        [string]$Color = 'Cyan',
+        
+        [switch]$UseNewLine
     )
-    Show-HashSmithSpinner -Message $Message -Seconds $Seconds
+    
+    $displayMessage = if (-not $NoSpinner) {
+        $chars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
+        $char = $chars[(Get-Date).Millisecond % $chars.Length]
+        "$char $Message"
+    } else {
+        "   $Message"
+    }
+    
+    # Ensure message fits in console width
+    if ($displayMessage.Length -gt 100) {
+        $displayMessage = $displayMessage.Substring(0, 97) + "..."
+    }
+    
+    # Atomic output with proper line management
+    [System.Threading.Monitor]::Enter($Script:CircuitBreakerLock)
+    try {
+        if ($UseNewLine) {
+            Write-Host $displayMessage -ForegroundColor $Color
+        } else {
+            # Clear line, write message
+            Write-Host ("`r" + (" " * 120) + "`r") -NoNewline
+            Write-Host $displayMessage -NoNewline -ForegroundColor $Color
+        }
+    }
+    finally {
+        [System.Threading.Monitor]::Exit($Script:CircuitBreakerLock)
+    }
+}
+
+<#
+.SYNOPSIS
+    Clears any progress messages from console
+
+.PARAMETER Lines
+    Number of lines to clear (default: 1)
+
+.EXAMPLE
+    Clear-HashSmithProgress
+#>
+function Clear-HashSmithProgress {
+    [CmdletBinding()]
+    param(
+        [int]$Lines = 1
+    )
+    
+    [System.Threading.Monitor]::Enter($Script:CircuitBreakerLock)
+    try {
+        for ($i = 0; $i -lt $Lines; $i++) {
+            Write-Host ("`r" + (" " * 120) + "`r") -NoNewline
+        }
+    }
+    finally {
+        [System.Threading.Monitor]::Exit($Script:CircuitBreakerLock)
+    }
+}
+
+<#
+.SYNOPSIS
+    Forces a new line after any progress output
+
+.EXAMPLE
+    Complete-HashSmithProgress
+#>
+function Complete-HashSmithProgress {
+    [CmdletBinding()]
+    param()
+    
+    [System.Threading.Monitor]::Enter($Script:CircuitBreakerLock)
+    try {
+        Write-Host ("`r" + (" " * 120) + "`r") -NoNewline
+        Write-Host ""  # Force new line
+    }
+    finally {
+        [System.Threading.Monitor]::Exit($Script:CircuitBreakerLock)
+    }
 }
 
 #endregion
 
-# Initialize enhanced system monitoring
-Start-SystemResourceMonitor
+#endregion
 
 # Register cleanup for module unload
 $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
-    Stop-SystemResourceMonitor
     Stop-HashSmithNetworkMonitor
     Invoke-TerminationHandlers
 }
@@ -1044,5 +1042,8 @@ Export-ModuleMember -Function @(
     'Clear-HashSmithFileSpinner',
     'Start-HashSmithNetworkMonitor',
     'Stop-HashSmithNetworkMonitor',
-    'Register-TerminationHandler'
+    'Register-TerminationHandler',
+    'Write-HashSmithProgress',
+    'Clear-HashSmithProgress',
+    'Complete-HashSmithProgress'
 )

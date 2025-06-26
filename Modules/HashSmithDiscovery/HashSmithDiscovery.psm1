@@ -204,11 +204,11 @@ function Get-FilesOptimized {
         # Progress update every batch
         if ($i % ($batchSize * 10) -eq 0) {
             $percent = [Math]::Round(($i / $Directories.Count) * 100, 1)
-            Write-Host "`r   📁 Processed: $([System.Threading.Interlocked]::CompareExchange($processedCount, 0, 0)) dirs ($percent%)" -NoNewline -ForegroundColor Cyan
+            Write-HashSmithProgress -Message "Processed: $([System.Threading.Interlocked]::CompareExchange($processedCount, 0, 0)) dirs ($percent%)" -NoSpinner
         }
     }
     
-    Write-Host "`r$(' ' * 60)`r" -NoNewline  # Clear progress
+    Clear-HashSmithProgress
     
     return @{
         Files = @($allFiles.ToArray())

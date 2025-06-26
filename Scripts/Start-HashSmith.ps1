@@ -1,18 +1,8 @@
 <#
 .SYNOPSIS
-    ENHANCED Production-ready file integrity verification system with CRITICAL BUG FIXES
+    Production-ready file integrity verification system with reliable resume functionality
     
 .DESCRIPTION
-    CRITICAL FIXES IMPLEMENTED:
-    ✅ FIXED: Resume functionality now properly skips already processed files
-    ✅ ENHANCED: 10x faster file discovery (239s → ~24s for large datasets)
-    ✅ ENHANCED: 3x faster hash computation with hardware acceleration
-    ✅ ENHANCED: Lock-free statistics with atomic operations
-    ✅ ENHANCED: Dynamic thread management and smart chunking
-    ✅ ENHANCED: Graceful termination with CTRL+C handling
-    ✅ ENHANCED: Memory usage reduced by 70% for large operations
-    ✅ ENHANCED: Professional terminal output with no visual artifacts
-
     Generates cryptographic hashes for ALL files in a directory tree with:
     - Guaranteed complete file discovery (no files missed)
     - Deterministic total directory integrity hash
@@ -22,7 +12,7 @@
     - Network path support with resilience
     - Unicode and long path support
     - Memory-efficient streaming processing
-    - Professional terminal output with enhanced performance monitoring
+    - Reliable resume functionality that properly skips processed files
     
 .PARAMETER SourceDir
     Path to the source directory to process.
@@ -34,7 +24,7 @@
     Hash algorithm to use (MD5, SHA1, SHA256, SHA512). Default: MD5.
     
 .PARAMETER Resume
-    Resume from existing log file, skipping already processed files. 🔥 FIXED!
+    Resume from existing log file, skipping already processed files.
     
 .PARAMETER FixErrors
     Re-process only files that previously failed.
@@ -49,20 +39,19 @@
     Include symbolic links and reparse points (default: false for safety).
     
 .PARAMETER MaxThreads
-    Maximum parallel threads (default: CPU count, optimized dynamically).
+    Maximum parallel threads (default: CPU count).
     
 .PARAMETER RetryCount
     Number of retries for failed files (default: 3).
     
 .PARAMETER ChunkSize
-    Base files to process per batch (default: 1000, optimized dynamically).
+    Base files to process per batch (default: 1000).
     
 .PARAMETER TimeoutSeconds
     Timeout for file operations in seconds (default: 30).
 
 .PARAMETER ProgressTimeoutMinutes
     Timeout in minutes for no progress before stopping processing (default: 120 minutes).
-    This allows large files (e.g., 80GB+) to be processed without timing out.
     
 .PARAMETER UseJsonLog
     Output structured JSON log alongside text log.
@@ -80,7 +69,7 @@
     Enable strict mode with maximum validation (slower but safer).
     
 .PARAMETER SortFilesBySize
-    Sort files by size (smaller first) for better progress indication when large files are present.
+    Sort files by size (smaller first) for better progress indication.
     
 .EXAMPLE
     .\Start-HashSmith.ps1 -SourceDir "C:\Data" -HashAlgorithm MD5 -Resume
@@ -92,24 +81,15 @@
     .\Start-HashSmith.ps1 -SourceDir "C:\Data" -FixErrors -UseJsonLog -VerifyIntegrity
     
 .NOTES
-    Version: 4.1.0-Enhanced with CRITICAL FIXES
+    Version: 4.1.0-Fixed
     Author: Production-Ready Implementation with Critical Bug Fixes
-    Requires: PowerShell 5.1 or higher (7+ recommended)
+    Requires: PowerShell 5.1 or higher (7+ recommended for parallel processing)
     
-    🔥 CRITICAL BUG FIXES:
-    - Resume functionality now properly filters already processed files
-    - No more reprocessing of completed files when using -Resume
-    - File discovery performance improved by 10x (4+ minutes → 30 seconds)
-    - Hash computation performance improved by 3x
-    - Memory usage reduced by 70% for large operations
-    - Thread safety issues resolved with lock-free atomic operations
-    - Graceful termination with proper cleanup on CTRL+C
-    
-    Performance Characteristics (ENHANCED):
-    - File discovery: ~50,000 files/second (vs. ~15,000 before)
-    - Hash computation: ~150 MB/second per thread (vs. ~50 MB/s before)  
-    - Memory usage: ~30 MB base + 1 MB per 10,000 files (vs. 50 MB + 2 MB before)
-    - Parallel efficiency: Near-linear scaling with dynamic optimization
+    Key Fixes:
+    - Resume functionality now properly skips already processed files
+    - Simplified architecture without complex timer issues
+    - Improved error handling and logging reliability
+    - Professional output without excessive marketing language
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -171,7 +151,7 @@ param(
     [int]$TimeoutSeconds = 30,
     
     [Parameter()]
-    [ValidateRange(5, 1440)]  # 5 minutes to 24 hours
+    [ValidateRange(5, 1440)]
     [int]$ProgressTimeoutMinutes = 120,
     
     [Parameter()]
@@ -196,11 +176,11 @@ param(
     [switch]$UseParallel
 )
 
-#region Enhanced Helper Functions
+#region Helper Functions
 
 <#
 .SYNOPSIS
-    Writes a professional header with enhanced formatting
+    Writes a professional header
 #>
 function Write-ProfessionalHeader {
     [CmdletBinding()]
@@ -226,7 +206,7 @@ function Write-ProfessionalHeader {
 
 <#
 .SYNOPSIS
-    Writes configuration item with enhanced formatting
+    Writes configuration item
 #>
 function Write-ConfigItem {
     [CmdletBinding()]
@@ -244,7 +224,7 @@ function Write-ConfigItem {
 
 <#
 .SYNOPSIS
-    Writes statistics item with enhanced formatting
+    Writes statistics item
 #>
 function Write-StatItem {
     [CmdletBinding()]
@@ -272,7 +252,7 @@ function Register-MainScriptTermination {
     
     # Register CTRL+C handler for main script
     Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-        Write-Host "`n🛑 Graceful shutdown initiated by user..." -ForegroundColor Yellow
+        Write-Host "`n🛑 Graceful shutdown initiated..." -ForegroundColor Yellow
         
         try {
             # Final log flush
@@ -293,7 +273,7 @@ function Register-MainScriptTermination {
         }
         
         Write-Host "✅ Graceful shutdown complete - Resume with -Resume to continue" -ForegroundColor Green
-        exit 130  # Standard SIGINT exit code
+        exit 130
     }
 }
 
@@ -306,9 +286,9 @@ $ScriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptPath
 $ModulesPath = Join-Path $ProjectRoot "Modules"
 
-# Enhanced startup with performance indication
+# Module loading
 Write-Host ""
-Write-Host "🔧 Initializing ENHANCED HashSmith modules..." -ForegroundColor Cyan
+Write-Host "🔧 Initializing HashSmith modules..." -ForegroundColor Cyan
 
 try {
     $modules = @(
@@ -323,31 +303,25 @@ try {
     
     $moduleLoadStart = Get-Date
     foreach ($module in $modules) {
-        Write-Host "   • Loading ENHANCED $module" -ForegroundColor Gray
+        Write-Host "   • Loading $module" -ForegroundColor Gray
         Import-Module (Join-Path $ModulesPath $module) -Force -Verbose:$false
     }
     $moduleLoadTime = (Get-Date) - $moduleLoadStart
     
-    Write-Host "✅ All ENHANCED modules loaded in $($moduleLoadTime.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
+    Write-Host "✅ All modules loaded in $($moduleLoadTime.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
 }
 catch {
-    Write-Host "❌ Failed to import ENHANCED HashSmith modules: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "❌ Failed to import HashSmith modules: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
 
-# Initialize enhanced configuration
+# Initialize configuration
 $configOverrides = @{
     ProgressTimeoutMinutes = $ProgressTimeoutMinutes
-    # Enhanced defaults for better performance
-    AdaptiveChunking = $true
-    DynamicThreading = $true
-    PerformanceMonitoring = $true
-    GracefulTermination = $true
-    MemoryManagement = $true
 }
 Initialize-HashSmithConfig -ConfigOverrides $configOverrides
 
-# Get enhanced configuration
+# Get configuration
 $config = Get-HashSmithConfig
 
 # Reset statistics for fresh run
@@ -357,10 +331,10 @@ Reset-HashSmithStatistics
 
 #region Main Script Execution
 
-# Initialize with enhanced monitoring
+# Initialize timing
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
-# ENHANCED professional banner with bug fix notification
+# Professional banner
 Write-Host ""
 Write-Host "██╗  ██╗ █████╗ ███████╗██╗  ██╗███████╗███╗   ███╗██╗████████╗██╗  ██╗" -ForegroundColor Cyan
 Write-Host "██║  ██║██╔══██╗██╔════╝██║  ██║██╔════╝████╗ ████║██║╚══██╔══╝██║  ██║" -ForegroundColor Cyan
@@ -369,24 +343,14 @@ Write-Host "██╔══██║██╔══██║╚════█�
 Write-Host "██║  ██║██║  ██║███████║██║  ██║███████║██║ ╚═╝ ██║██║   ██║   ██║  ██║" -ForegroundColor Cyan
 Write-Host "╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝" -ForegroundColor Cyan
 
-Write-ProfessionalHeader -Title "🔐 Production File Integrity System 🔐" -Subtitle "Version $($config.Version) - Resume Bug FIXED + 10x Performance Boost" -Color "Magenta"
+Write-ProfessionalHeader -Title "🔐 Production File Integrity System 🔐" -Subtitle "Version $($config.Version) - Reliable and Efficient" -Color "Blue"
 
-# Critical fix notification
-Write-Host "🔥 CRITICAL FIXES APPLIED:" -ForegroundColor Red
-Write-Host "   ✅ Resume functionality now works correctly (no more reprocessing!)" -ForegroundColor Green
-Write-Host "   ⚡ 10x faster file discovery (4+ minutes → 30 seconds)" -ForegroundColor Green
-Write-Host "   🚀 3x faster hash computation with hardware acceleration" -ForegroundColor Green
-Write-Host "   🧠 70% less memory usage through optimized algorithms" -ForegroundColor Green
-Write-Host "   🛡️ Thread-safe operations with atomic statistics" -ForegroundColor Green
-Write-Host "   🎯 Graceful termination with CTRL+C handling" -ForegroundColor Green
-Write-Host ""
-
-# Enhanced system information display
+# System information
 $osWindows = $PSVersionTable.PSVersion.Major -ge 6 ? $IsWindows : ($env:OS -eq "Windows_NT")
 $osLinux = $PSVersionTable.PSVersion.Major -ge 6 ? $IsLinux : $false
 $osMacOS = $PSVersionTable.PSVersion.Major -ge 6 ? $IsMacOS : $false
 
-# Enhanced memory detection
+# Memory detection
 $memoryGB = 0
 try {
     if ($osWindows) {
@@ -395,55 +359,28 @@ try {
         } else {
             $memoryGB = [Math]::Round(((Get-WmiObject Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB), 1)
         }
-    } elseif ($osLinux) {
-        if (Test-Path '/proc/meminfo') {
-            $memInfo = Get-Content '/proc/meminfo' | Where-Object { $_ -match '^MemTotal:' }
-            if ($memInfo -match '(\d+)\s*kB') {
-                $memoryGB = [Math]::Round(([int64]$matches[1] * 1024 / 1GB), 1)
-            }
-        }
-    } elseif ($osMacOS) {
-        try {
-            $hwMemory = & sysctl -n hw.memsize 2>$null
-            if ($hwMemory) {
-                $memoryGB = [Math]::Round(([int64]$hwMemory / 1GB), 1)
-            }
-        } catch {
-            $memoryGB = 0
+    } elseif ($osLinux -and (Test-Path '/proc/meminfo')) {
+        $memInfo = Get-Content '/proc/meminfo' | Where-Object { $_ -match '^MemTotal:' }
+        if ($memInfo -match '(\d+)\s*kB') {
+            $memoryGB = [Math]::Round(([int64]$matches[1] * 1024 / 1GB), 1)
         }
     }
 } catch {
-    Write-HashSmithLog -Message "Failed to get memory information: $($_.Exception.Message)" -Level WARN
     $memoryGB = 0
 }
 
 $computerName = if ($osWindows) { 
     $env:COMPUTERNAME 
 } else { 
-    $hostname = $env:HOSTNAME
-    if (-not $hostname) {
-        try {
-            $hostname = & hostname 2>$null
-            if ($hostname -and $hostname.GetType().Name -eq 'String') {
-                $hostname = $hostname.Trim()
-            }
-        } catch {
-            $hostname = "Unknown"
-        }
-    }
-    if (-not $hostname -or [string]::IsNullOrWhiteSpace($hostname)) {
-        $hostname = "Linux-Host"
-    }
-    $hostname
+    $env:HOSTNAME -or "Unknown"
 }
 
-Write-Host "🖥️ Enhanced System Information" -ForegroundColor Yellow
+Write-Host "🖥️ System Information" -ForegroundColor Yellow
 Write-Host "   Computer Name    : $computerName" -ForegroundColor White
 Write-Host "   Operating System : $(if($osWindows){'Windows'}elseif($osLinux){'Linux'}elseif($osMacOS){'macOS'}else{'Unknown'})" -ForegroundColor White
 Write-Host "   PowerShell       : $($PSVersionTable.PSVersion)" -ForegroundColor White
 Write-Host "   CPU Cores        : $([Environment]::ProcessorCount)" -ForegroundColor White
 Write-Host "   Total Memory     : $(if($memoryGB -gt 0){"$memoryGB GB"}else{"Unknown"})" -ForegroundColor White
-Write-Host "   Optimizations    : Enhanced Discovery, Lock-Free Stats, Dynamic Threading" -ForegroundColor Green
 Write-Host ""
 
 try {
@@ -454,7 +391,7 @@ try {
     if (-not $LogFile) {
         $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
         $sourceName = Split-Path $SourceDir -Leaf
-        $LogFile = Join-Path $SourceDir "${sourceName}_${HashAlgorithm}_${timestamp}_ENHANCED.log"
+        $LogFile = Join-Path $SourceDir "${sourceName}_${HashAlgorithm}_${timestamp}.log"
     }
     
     $LogFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($LogFile)
@@ -462,21 +399,21 @@ try {
     # Register graceful termination
     Register-MainScriptTermination -LogPath $LogFile
     
-    # Enhanced configuration display
-    Write-ProfessionalHeader -Title "Enhanced Configuration Settings" -Color "Blue"
+    # Configuration display
+    Write-ProfessionalHeader -Title "Configuration Settings" -Color "Green"
     
     Write-ConfigItem -Icon "📁" -Label "Source Directory" -Value $SourceDir -Color "Cyan"
     Write-ConfigItem -Icon "📝" -Label "Log File" -Value $LogFile -Color "Green"
     Write-ConfigItem -Icon "🔑" -Label "Hash Algorithm" -Value $HashAlgorithm -Color "Yellow"
-    Write-ConfigItem -Icon "🧵" -Label "Max Threads" -Value "$MaxThreads (dynamic optimization enabled)" -Color "Magenta"
-    Write-ConfigItem -Icon "📦" -Label "Chunk Size" -Value "$ChunkSize (adaptive sizing enabled)" -Color "Cyan"
+    Write-ConfigItem -Icon "🧵" -Label "Max Threads" -Value $MaxThreads -Color "Magenta"
+    Write-ConfigItem -Icon "📦" -Label "Chunk Size" -Value $ChunkSize -Color "Cyan"
     Write-ConfigItem -Icon "👁️ " -Label "Include Hidden" -Value $IncludeHidden -Color $(if($IncludeHidden){"Green"}else{"Red"})
     Write-ConfigItem -Icon "🔗" -Label "Include Symlinks" -Value $IncludeSymlinks -Color $(if($IncludeSymlinks){"Green"}else{"Red"})
     Write-ConfigItem -Icon "🛡️ " -Label "Verify Integrity" -Value $VerifyIntegrity -Color $(if($VerifyIntegrity){"Green"}else{"Gray"})
     Write-ConfigItem -Icon "⚡" -Label "Strict Mode" -Value $StrictMode -Color $(if($StrictMode){"Yellow"}else{"Gray"})
     Write-ConfigItem -Icon "🧪" -Label "Test Mode" -Value $TestMode -Color $(if($TestMode){"Yellow"}else{"Gray"})
     
-    # 🔥 CRITICAL: Display resume status clearly
+    # Display resume status
     if ($Resume) {
         Write-ConfigItem -Icon "🔄" -Label "Resume Mode" -Value "ENABLED (will skip processed files)" -Color "Green"
     } elseif ($FixErrors) {
@@ -485,7 +422,7 @@ try {
         Write-ConfigItem -Icon "🆕" -Label "Processing Mode" -Value "FULL (process all files)" -Color "Cyan"
     }
     
-    # Enhanced write permissions test
+    # Test write permissions
     if (-not $WhatIfPreference) {
         try {
             $testFile = Join-Path (Split-Path $LogFile) "test_write_$([Guid]::NewGuid()).tmp"
@@ -506,42 +443,36 @@ try {
         }
     }
     
-    # 🔥 ENHANCED: Load existing entries for resume/fix with performance monitoring
+    # Load existing entries for resume/fix
     $existingEntries = @{ Processed = @{}; Failed = @{} }
     if ($Resume -or $FixErrors) {
         if (Test-Path $LogFile) {
             Write-Host ""
-            Write-Host "🔄 ENHANCED: Loading existing log entries for resume operation..." -ForegroundColor Cyan
+            Write-Host "🔄 Loading existing log entries for resume operation..." -ForegroundColor Cyan
             
             $loadStart = Get-Date
             $existingEntries = Get-HashSmithExistingEntries -LogPath $LogFile
             $loadTime = (Get-Date) - $loadStart
             
-            Write-Host "   ✅ Log loaded in $($loadTime.TotalSeconds.ToString('F1'))s with enhanced parser" -ForegroundColor Green
+            Write-Host "   ✅ Log loaded in $($loadTime.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
             Write-Host "   • Processed: $($existingEntries.Statistics.ProcessedCount)" -ForegroundColor Green
             Write-Host "   • Failed: $($existingEntries.Statistics.FailedCount)" -ForegroundColor Red
-            if ($existingEntries.Statistics.LinesPerSecond -gt 0) {
-                Write-Host "   • Performance: $($existingEntries.Statistics.LinesPerSecond) lines/second" -ForegroundColor Cyan
-            }
-            if ($existingEntries.Statistics.SymlinkCount -gt 0) {
-                Write-Host "   • Symlinks: $($existingEntries.Statistics.SymlinkCount)" -ForegroundColor Magenta
-            }
         } else {
             Write-Host "⚠️  Resume/Fix requested but no existing log file found" -ForegroundColor Yellow
         }
     }
     
-    # Enhanced file discovery phase
-    Write-ProfessionalHeader -Title "ENHANCED File Discovery Phase (10x Faster)" -Color "Green"
-    Write-Host "🚀 Ultra-fast file discovery with 10x performance improvements..." -ForegroundColor Cyan
+    # File discovery phase
+    Write-ProfessionalHeader -Title "File Discovery Phase" -Color "Green"
+    Write-Host "🚀 Starting file discovery..." -ForegroundColor Cyan
     
     $discoveryResult = Get-HashSmithAllFiles -Path $SourceDir -ExcludePatterns $ExcludePatterns -IncludeHidden:$IncludeHidden -IncludeSymlinks:$IncludeSymlinks -TestMode:$TestMode -StrictMode:$StrictMode
     $allFiles = $discoveryResult.Files
     $discoveryStats = $discoveryResult.Statistics
     
-    # Enhanced discovery results display
+    # Discovery results display
     Write-Host ""
-    Write-Host "✅ ENHANCED File Discovery Complete" -ForegroundColor Green
+    Write-Host "✅ File Discovery Complete" -ForegroundColor Green
     Write-Host "┌─────────────────────────────────────────┐" -ForegroundColor Gray
     Write-StatItem -Icon "📊" -Label "Files Found" -Value $allFiles.Count -Color "Cyan"
     Write-StatItem -Icon "⏭️" -Label "Files Skipped" -Value $discoveryStats.TotalSkipped -Color "Yellow"
@@ -549,12 +480,12 @@ try {
     if ($discoveryResult.Errors.Count -gt 0) {
         Write-StatItem -Icon "⚠️ " -Label "Discovery Errors" -Value $discoveryResult.Errors.Count -Color "Red"
     }
-    Write-StatItem -Icon "⏱️" -Label "Discovery Time" -Value "$($discoveryStats.DiscoveryTime.ToString('F2'))s (ENHANCED)" -Color "Blue"
-    Write-StatItem -Icon "🚀" -Label "Performance" -Value "$($discoveryStats.FilesPerSecond) files/second (~10x improvement)" -Color "Green"
+    Write-StatItem -Icon "⏱️" -Label "Discovery Time" -Value "$($discoveryStats.DiscoveryTime.ToString('F2'))s" -Color "Blue"
+    Write-StatItem -Icon "🚀" -Label "Performance" -Value "$($discoveryStats.FilesPerSecond) files/second" -Color "Green"
     Write-Host "└─────────────────────────────────────────┘" -ForegroundColor Gray
     Write-Host ""
     
-    # 🔥 CRITICAL FIX: Enhanced file filtering for resume functionality
+    # File filtering for resume functionality
     $filesToProcess = @()
     $skippedResumeCount = 0
     
@@ -563,7 +494,6 @@ try {
         Write-Host "🔧 Fix Mode: Identifying failed files to retry..." -ForegroundColor Yellow
         
         foreach ($failedPath in $existingEntries.Failed.Keys) {
-            # Handle both absolute and relative paths from log
             $absolutePath = if ([System.IO.Path]::IsPathRooted($failedPath)) { 
                 $failedPath 
             } else { 
@@ -578,26 +508,19 @@ try {
         Write-Host "   ✅ Fix Mode: Will retry $($filesToProcess.Count) failed files" -ForegroundColor Yellow
         
     } elseif ($Resume) {
-        # 🔥 CRITICAL FIX: Properly filter already processed files
+        # Properly filter already processed files
         Write-Host "🔄 Resume Mode: Filtering already processed files..." -ForegroundColor Cyan
         Write-Host "   📊 Found $($existingEntries.Processed.Count) processed files in log" -ForegroundColor Gray
         
         $filterStart = Get-Date
         foreach ($file in $allFiles) {
-            # Check multiple path formats to ensure we catch all processed files
             $absolutePath = $file.FullName
             $relativePath = $absolutePath.Substring($SourceDir.Length).TrimStart('\', '/')
             
-            # Enhanced checking: look for the file in multiple path formats
+            # Check if file was already processed
             $alreadyProcessed = $existingEntries.Processed.ContainsKey($absolutePath) -or 
                                $existingEntries.Processed.ContainsKey($relativePath) -or
                                $existingEntries.Processed.ContainsKey($file.FullName)
-            
-            # Additional check: normalize paths for comparison
-            if (-not $alreadyProcessed) {
-                $normalizedPath = $file.FullName.Replace('/', '\')
-                $alreadyProcessed = $existingEntries.Processed.ContainsKey($normalizedPath)
-            }
             
             if ($alreadyProcessed) {
                 $skippedResumeCount++
@@ -629,26 +552,25 @@ try {
         exit 0
     }
     
-    # Enhanced processing analysis with performance predictions
+    # Processing analysis
     $totalFiles = $filesToProcess.Count
     $totalSize = ($filesToProcess | Measure-Object -Property Length -Sum).Sum
     
-    # Sort files by size if requested (enhanced sorting)
+    # Sort files by size if requested
     if ($SortFilesBySize) {
-        Write-Host "📊 Sorting files by size (smaller first) for optimal progress tracking..." -ForegroundColor Cyan
+        Write-Host "📊 Sorting files by size (smaller first)..." -ForegroundColor Cyan
         $filesToProcess = $filesToProcess | Sort-Object Length
         Write-Host "   ✅ Files sorted - smaller files will be processed first" -ForegroundColor Green
     }
     
-    # Enhanced file analysis
+    # File analysis
     $smallFiles = ($filesToProcess | Where-Object { $_.Length -lt 1MB }).Count
     $mediumFiles = ($filesToProcess | Where-Object { $_.Length -ge 1MB -and $_.Length -lt 100MB }).Count
     $largeFiles = ($filesToProcess | Where-Object { $_.Length -ge 100MB -and $_.Length -lt 1GB }).Count
     $veryLargeFiles = ($filesToProcess | Where-Object { $_.Length -ge 1GB }).Count
-    $giantFiles = ($filesToProcess | Where-Object { $_.Length -ge 10GB }).Count
     
-    # Enhanced processing overview
-    Write-ProfessionalHeader -Title "ENHANCED Processing Overview" -Color "Magenta"
+    # Processing overview
+    Write-ProfessionalHeader -Title "Processing Overview" -Color "Magenta"
     Write-StatItem -Icon "📁" -Label "Files to Process" -Value $totalFiles -Color "Cyan"
     Write-StatItem -Icon "💾" -Label "Total Size" -Value "$('{0:N2} GB' -f ($totalSize / 1GB))" -Color "Green"
     
@@ -664,60 +586,41 @@ try {
     if ($veryLargeFiles -gt 0) {
         Write-StatItem -Icon "🔺" -Label "Very Large Files (>1GB)" -Value $veryLargeFiles -Color "Red"
     }
-    if ($giantFiles -gt 0) {
-        Write-StatItem -Icon "⚠️ " -Label "Giant Files (>10GB)" -Value $giantFiles -Color "Magenta"
-    }
     
-    # Enhanced time estimation with hardware acceleration detection
-    $throughputModifier = 2.5  # Enhanced algorithms are ~2.5x faster
-    if ($HashAlgorithm -eq 'MD5') {
-        $throughputModifier = 3.0  # MD5 benefits most from optimizations
-    }
-    
-    $estimatedSeconds = ($totalSize / 50MB) / [Environment]::ProcessorCount / $throughputModifier
-    $estimatedSeconds = [Math]::Max(10, $estimatedSeconds)  # Minimum 10 seconds
+    # Time estimation
+    $estimatedSeconds = ($totalSize / 50MB) / [Environment]::ProcessorCount
+    $estimatedSeconds = [Math]::Max(10, $estimatedSeconds)
     
     if ($estimatedSeconds -lt 60) {
-        Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N0} seconds (ENHANCED)' -f $estimatedSeconds)" -Color "Blue"
+        Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N0} seconds' -f $estimatedSeconds)" -Color "Blue"
     } elseif ($estimatedSeconds -lt 3600) {
-        Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N1} minutes (ENHANCED)' -f ($estimatedSeconds / 60))" -Color "Blue"
+        Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N1} minutes' -f ($estimatedSeconds / 60))" -Color "Blue"
     } else {
-        Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N1} hours (ENHANCED)' -f ($estimatedSeconds / 3600))" -Color "Blue"
+        Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N1} hours' -f ($estimatedSeconds / 3600))" -Color "Blue"
     }
     
-    Write-StatItem -Icon "🚀" -Label "Performance Boost" -Value "~3x faster than original" -Color "Green"
-    Write-StatItem -Icon "🧵" -Label "Threading" -Value "Dynamic optimization enabled" -Color "Magenta"
-    Write-StatItem -Icon "📦" -Label "Chunking" -Value "Adaptive sizing enabled" -Color "Yellow"
+    Write-StatItem -Icon "🧵" -Label "Threading" -Value "Optimized for workload" -Color "Magenta"
+    Write-StatItem -Icon "📦" -Label "Chunking" -Value "Adaptive sizing" -Color "Yellow"
     Write-Host ""
     
-    # Enhanced WhatIf mode
+    # WhatIf mode
     if ($WhatIfPreference) {
-        Write-ProfessionalHeader -Title "🔮 ENHANCED WHAT-IF MODE RESULTS 🔮" -Color "Yellow"
+        Write-ProfessionalHeader -Title "🔮 WHAT-IF MODE RESULTS 🔮" -Color "Yellow"
         
-        $memoryEstimate = 30 + (($totalFiles / 10000) * 1)  # Enhanced memory efficiency
+        $memoryEstimate = 30 + (($totalFiles / 10000) * 1)
         
         Write-StatItem -Icon "📊" -Label "Files to Process" -Value $totalFiles -Color "Cyan"
         Write-StatItem -Icon "💾" -Label "Total Size" -Value "$('{0:N2} GB' -f ($totalSize / 1GB))" -Color "Green"
-        Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N1} minutes (ENHANCED)' -f ($estimatedSeconds / 60))" -Color "Magenta"
-        Write-StatItem -Icon "🧵" -Label "Threads to Use" -Value "$MaxThreads (with dynamic optimization)" -Color "Cyan"
-        Write-StatItem -Icon "🧠" -Label "Est. Memory Usage" -Value "$('{0:N0} MB (70% reduction)' -f $memoryEstimate)" -Color "Yellow"
-        Write-StatItem -Icon "🔑" -Label "Hash Algorithm" -Value "$HashAlgorithm (hardware accelerated)" -Color "Blue"
-        
-        Write-Host ""
-        Write-Host "🔥 ENHANCED Capabilities:" -ForegroundColor Green
-        Write-Host "   • Resume functionality FIXED - no more reprocessing" -ForegroundColor Cyan
-        Write-Host "   • 10x faster file discovery through parallel processing" -ForegroundColor Cyan
-        Write-Host "   • 3x faster hash computation with hardware acceleration" -ForegroundColor Cyan
-        Write-Host "   • Lock-free statistics with atomic operations" -ForegroundColor Cyan
-        Write-Host "   • Dynamic thread management based on workload" -ForegroundColor Cyan
-        Write-Host "   • Graceful termination with CTRL+C handling" -ForegroundColor Cyan
-        Write-Host "   • Memory usage reduced by 70% through optimization" -ForegroundColor Cyan
+        Write-StatItem -Icon "⏱️" -Label "Estimated Time" -Value "$('{0:N1} minutes' -f ($estimatedSeconds / 60))" -Color "Magenta"
+        Write-StatItem -Icon "🧵" -Label "Threads to Use" -Value $MaxThreads -Color "Cyan"
+        Write-StatItem -Icon "🧠" -Label "Est. Memory Usage" -Value "$('{0:N0} MB' -f $memoryEstimate)" -Color "Yellow"
+        Write-StatItem -Icon "🔑" -Label "Hash Algorithm" -Value $HashAlgorithm -Color "Blue"
         
         Write-Host ""
         exit 0
     }
     
-    # Initialize enhanced log file
+    # Initialize log file
     if (-not $Resume -and -not $FixErrors) {
         $configuration = @{
             IncludeHidden = $IncludeHidden
@@ -726,40 +629,36 @@ try {
             StrictMode = $StrictMode.IsPresent
             MaxThreads = $MaxThreads
             ChunkSize = $ChunkSize
-            Enhanced = $true
             Version = $config.Version
         }
         
         Initialize-HashSmithLogFile -LogPath $LogFile -Algorithm $HashAlgorithm -SourcePath $SourceDir -DiscoveryStats $discoveryStats -Configuration $configuration
     }
     
-    # ENHANCED processing phase with critical fixes
-    Write-ProfessionalHeader -Title "ENHANCED File Processing Phase (3x Faster)" -Color "Green"
-    Write-Host "⚡ Starting ENHANCED file processing with critical fixes..." -ForegroundColor Cyan
+    # Processing phase
+    Write-ProfessionalHeader -Title "File Processing Phase" -Color "Green"
+    Write-Host "⚡ Starting file processing..." -ForegroundColor Cyan
     
-    # Determine enhanced parallel processing
+    # Determine parallel processing
     $useParallel = if ($UseParallel) { 
         $true 
     } elseif ($PSVersionTable.PSVersion.Major -ge 7) { 
-        $true  # Default to parallel on PowerShell 7+
+        $true
     } else { 
         $false 
     }
     
     if ($useParallel -and $PSVersionTable.PSVersion.Major -ge 7) {
-        Write-Host "🚀 ENHANCED parallel processing enabled (PowerShell 7+)" -ForegroundColor Green
-        Write-Host "   • Dynamic thread management: Enabled" -ForegroundColor Cyan
-        Write-Host "   • Hardware acceleration: Enabled" -ForegroundColor Cyan
-        Write-Host "   • Lock-free statistics: Enabled" -ForegroundColor Cyan
+        Write-Host "🚀 Parallel processing enabled (PowerShell 7+)" -ForegroundColor Green
     } else {
-        Write-Host "⚙️  Enhanced sequential processing mode" -ForegroundColor Gray
+        Write-Host "⚙️  Sequential processing mode" -ForegroundColor Gray
     }
     Write-Host ""
     
-    # 🔥 ENHANCED: Process files with all critical fixes applied
+    # Process files
     $fileHashes = Start-HashSmithFileProcessing -Files $filesToProcess -LogPath $LogFile -Algorithm $HashAlgorithm -ExistingEntries $existingEntries -BasePath $SourceDir -StrictMode:$StrictMode -VerifyIntegrity:$VerifyIntegrity -MaxThreads $MaxThreads -ChunkSize $ChunkSize -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -ProgressTimeoutMinutes $ProgressTimeoutMinutes -ShowProgress:$ShowProgress -UseParallel:$useParallel
     
-    # Enhanced result handling
+    # Handle results
     $actualFileHashes = if ($fileHashes -is [hashtable]) {
         $fileHashes
     } elseif ($fileHashes -is [array] -and $fileHashes.Count -gt 0) {
@@ -769,10 +668,10 @@ try {
         @{}
     }
     
-    # Enhanced directory integrity hash computation
+    # Directory integrity hash computation
     if (-not $FixErrors -and $actualFileHashes.Count -gt 0) {
         Write-Host ""
-        Write-Host "🔐 Computing enhanced directory integrity hash..." -ForegroundColor Cyan
+        Write-Host "🔐 Computing directory integrity hash..." -ForegroundColor Cyan
         
         # Include existing processed files for complete directory hash
         $allFileHashes = @{}
@@ -782,7 +681,7 @@ try {
             $allFileHashes[$key] = $actualFileHashes[$key]
         }
         
-        # Add existing processed files for complete directory hash
+        # Add existing processed files
         foreach ($processedFile in $existingEntries.Processed.Keys) {
             $absolutePath = if ([System.IO.Path]::IsPathRooted($processedFile)) { 
                 $processedFile 
@@ -805,7 +704,7 @@ try {
         $directoryHashResult = Get-HashSmithDirectoryIntegrityHash -FileHashes $allFileHashes -Algorithm $HashAlgorithm -BasePath $SourceDir -StrictMode:$StrictMode
         
         if ($directoryHashResult) {
-            # Enhanced final summary with performance metrics
+            # Final summary
             $totalBytes = $directoryHashResult.TotalSize
             $totalGB = $totalBytes / 1GB
             $processingTime = $stopwatch.Elapsed.TotalSeconds
@@ -814,33 +713,24 @@ try {
             $summaryInfo = @(
                 "",
                 "Total$($HashAlgorithm) = $($directoryHashResult.Hash)",
-                "$($directoryHashResult.FileCount) files checked ($($totalBytes) bytes, $($totalGB.ToString('F2')) GB, $($throughputMBps.ToString('F1')) MB/s ENHANCED)."
+                "$($directoryHashResult.FileCount) files checked ($($totalBytes) bytes, $($totalGB.ToString('F2')) GB, $($throughputMBps.ToString('F1')) MB/s)."
             )
             
             $summaryInfo | Add-Content -Path $LogFile -Encoding UTF8
-            Write-Host "✅ Enhanced directory hash: $($directoryHashResult.Hash)" -ForegroundColor Green
+            Write-Host "✅ Directory hash: $($directoryHashResult.Hash)" -ForegroundColor Green
         }
     }
     
     $stopwatch.Stop()
     $stats = Get-HashSmithStatistics
     
-    # Enhanced JSON log generation
+    # JSON log generation
     if ($UseJsonLog) {
-        Write-Host "📊 Generating ENHANCED structured JSON log..." -ForegroundColor Cyan
+        Write-Host "📊 Generating structured JSON log..." -ForegroundColor Cyan
         
         $jsonLog = @{
-            Version = $config.Version + "-Enhanced"
+            Version = $config.Version
             Timestamp = Get-Date -Format 'o'
-            EnhancedFeatures = @(
-                "ResumeBugFixed"
-                "10xFasterDiscovery" 
-                "3xFasterHashing"
-                "LockFreeStatistics"
-                "DynamicThreading"
-                "GracefulTermination"
-                "70PercentLessMemory"
-            )
             Configuration = @{
                 SourceDirectory = $SourceDir
                 HashAlgorithm = $HashAlgorithm
@@ -853,16 +743,11 @@ try {
                 RetryCount = $RetryCount
                 TimeoutSeconds = $TimeoutSeconds
                 ProgressTimeoutMinutes = $ProgressTimeoutMinutes
-                Enhanced = $true
             }
             Statistics = $stats
             DiscoveryStats = $discoveryStats
             ProcessingTime = $stopwatch.Elapsed.TotalSeconds
-            CircuitBreakerStats = Get-HashSmithCircuitBreaker
-            NetworkConnections = (Get-HashSmithNetworkConnections).Keys
-            Errors = Get-HashSmithStructuredLogs | Where-Object { $_.Level -in @('WARN', 'ERROR') }
             DirectoryHash = if ($directoryHashResult) { $directoryHashResult } else { $null }
-            PerformanceMetrics = Get-HashSmithPerformanceMetrics
             ResumeInfo = @{
                 WasResumed = $Resume.IsPresent
                 SkippedFiles = $skippedResumeCount
@@ -873,37 +758,32 @@ try {
         
         $jsonPath = [System.IO.Path]::ChangeExtension($LogFile, '.json')
         $jsonLog | ConvertTo-Json -Depth 10 | Set-Content -Path $jsonPath -Encoding UTF8
-        Write-Host "✅ Enhanced JSON log saved: $jsonPath" -ForegroundColor Green
+        Write-Host "✅ JSON log saved: $jsonPath" -ForegroundColor Green
     }
     
-    # ENHANCED final summary with performance metrics
+    # Final summary
     Write-Host ""
-    Write-ProfessionalHeader -Title "🎉 ENHANCED OPERATION COMPLETE 🎉" -Color "Green"
+    Write-ProfessionalHeader -Title "🎉 OPERATION COMPLETE 🎉" -Color "Green"
     
-    Write-Host "📊 ENHANCED Processing Statistics" -ForegroundColor Yellow
+    Write-Host "📊 Processing Statistics" -ForegroundColor Yellow
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Blue
     
-    Write-StatItem -Icon "🔍" -Label "Files Discovered" -Value "$($stats.FilesDiscovered) (ENHANCED)" -Color "Cyan"
+    Write-StatItem -Icon "🔍" -Label "Files Discovered" -Value $stats.FilesDiscovered -Color "Cyan"
     Write-StatItem -Icon "✅" -Label "Files Processed" -Value $stats.FilesProcessed -Color "Green"
     if ($skippedResumeCount -gt 0) {
         Write-StatItem -Icon "⏭️" -Label "Files Resumed (Skipped)" -Value $skippedResumeCount -Color "Yellow"
     }
     Write-StatItem -Icon "❌" -Label "Files Failed" -Value $stats.FilesError -Color $(if($stats.FilesError -eq 0){"Green"}else{"Red"})
     Write-StatItem -Icon "💾" -Label "Data Processed" -Value "$('{0:N2} GB' -f ($stats.BytesProcessed / 1GB))" -Color "Magenta"
-    Write-StatItem -Icon "⏱️" -Label "Processing Time" -Value "$($stopwatch.Elapsed.ToString('hh\:mm\:ss')) (ENHANCED)" -Color "Blue"
+    Write-StatItem -Icon "⏱️" -Label "Processing Time" -Value "$($stopwatch.Elapsed.ToString('hh\:mm\:ss'))" -Color "Blue"
     
-    $enhancedThroughput = if ($stopwatch.Elapsed.TotalSeconds -gt 0) { 
+    $throughput = if ($stopwatch.Elapsed.TotalSeconds -gt 0) { 
         ($stats.BytesProcessed / 1MB) / $stopwatch.Elapsed.TotalSeconds 
     } else { 0 }
-    Write-StatItem -Icon "🚀" -Label "Enhanced Speed" -Value "$('{0:N1} MB/s (~3x improvement)' -f $enhancedThroughput)" -Color "Cyan"
-    
-    # Enhanced performance summary
-    if ($discoveryStats.FilesPerSecond -gt 0) {
-        Write-StatItem -Icon "📊" -Label "Discovery Rate" -Value "$($discoveryStats.FilesPerSecond) files/s (~10x improvement)" -Color "Green"
-    }
+    Write-StatItem -Icon "🚀" -Label "Throughput" -Value "$('{0:N1} MB/s' -f $throughput)" -Color "Cyan"
     
     Write-Host ""
-    Write-Host "📄 Enhanced Output Files" -ForegroundColor Yellow
+    Write-Host "📄 Output Files" -ForegroundColor Yellow
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Blue
     Write-Host "📝 Log File    : $LogFile" -ForegroundColor White
     
@@ -913,49 +793,37 @@ try {
     
     Write-Host ""
     
-    # Enhanced completion status with performance summary
+    # Completion status
     if ($stats.FilesError -gt 0) {
-        Write-Host "⚠️  COMPLETED WITH WARNINGS (ENHANCED)" -ForegroundColor Yellow
+        Write-Host "⚠️  COMPLETED WITH WARNINGS" -ForegroundColor Yellow
         Write-Host "┌─────────────────────────────────────────┐" -ForegroundColor Yellow
         Write-Host "│  • $($stats.FilesError) files failed processing" -ForegroundColor Red
         Write-Host "│  • Use -FixErrors to retry failed files" -ForegroundColor White
         Write-Host "│  • Use -Resume to continue if interrupted" -ForegroundColor White
-        Write-Host "│  • Check JSON log for detailed analysis" -ForegroundColor White
         Write-Host "└─────────────────────────────────────────┘" -ForegroundColor Yellow
         Set-HashSmithExitCode -ExitCode 1
     } else {
-        Write-Host "🎉 SUCCESS - ALL FILES PROCESSED (ENHANCED)" -ForegroundColor Green
+        Write-Host "🎉 SUCCESS - ALL FILES PROCESSED" -ForegroundColor Green
         Write-Host "┌─────────────────────────────────────────┐" -ForegroundColor Green
         Write-Host "│  ✅ Zero errors detected" -ForegroundColor Green
-        Write-Host "│  🚀 Enhanced performance: ~3x faster" -ForegroundColor Green
-        Write-Host "│  🔄 Resume functionality: FIXED" -ForegroundColor Green
+        Write-Host "│  🚀 Processing completed successfully" -ForegroundColor Green
         Write-Host "│  🛡️ All security checks passed" -ForegroundColor Green
         Write-Host "└─────────────────────────────────────────┘" -ForegroundColor Green
     }
-    
-    # Performance achievement summary
-    Write-Host ""
-    Write-Host "🏆 ENHANCEMENT ACHIEVEMENTS:" -ForegroundColor Magenta
-    Write-Host "   🔥 Resume bug FIXED - no more reprocessing" -ForegroundColor Green
-    Write-Host "   ⚡ Discovery speed: ~10x improvement" -ForegroundColor Green  
-    Write-Host "   🚀 Hash computation: ~3x improvement" -ForegroundColor Green
-    Write-Host "   🧠 Memory usage: ~70% reduction" -ForegroundColor Green
-    Write-Host "   🛡️ Thread safety: Atomic operations" -ForegroundColor Green
-    Write-Host "   🎯 Graceful termination: CTRL+C handling" -ForegroundColor Green
     
     Write-Host ""
 }
 catch {
     Write-Host ""
-    Write-Host "💥 CRITICAL ERROR (ENHANCED HANDLER)" -ForegroundColor Red
+    Write-Host "💥 CRITICAL ERROR" -ForegroundColor Red
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Red
     Write-Host "Error: $($_.Exception.Message)" -ForegroundColor White
     Write-Host "Location: $($_.InvocationInfo.ScriptName):$($_.InvocationInfo.ScriptLineNumber)" -ForegroundColor Gray
     Write-Host "Stack: $($_.ScriptStackTrace)" -ForegroundColor DarkGray
     Write-Host ""
     
-    Write-HashSmithLog -Message "ENHANCED: Critical error: $($_.Exception.Message)" -Level ERROR
-    Write-HashSmithLog -Message "ENHANCED: Stack trace: $($_.ScriptStackTrace)" -Level ERROR
+    Write-HashSmithLog -Message "Critical error: $($_.Exception.Message)" -Level ERROR
+    Write-HashSmithLog -Message "Stack trace: $($_.ScriptStackTrace)" -Level ERROR
     Set-HashSmithExitCode -ExitCode 3
 }
 finally {
@@ -963,19 +831,12 @@ finally {
         $stopwatch.Stop()
     }
     
-    # Enhanced cleanup
+    # Cleanup
     try {
         # Final log flush
         if ($LogFile) {
             Clear-HashSmithLogBatch -LogPath $LogFile
         }
-        
-        # Performance summary
-        $performanceMetrics = Get-HashSmithPerformanceMetrics
-        if ($performanceMetrics.Count -gt 0) {
-            Write-HashSmithLog -Message "ENHANCED: Final performance metrics captured" -Level INFO
-        }
-        
     } catch {
         # Silent cleanup
     }

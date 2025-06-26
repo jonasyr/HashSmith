@@ -1,278 +1,84 @@
 <#
 .SYNOPSIS
-    Enhanced log management for HashSmith - HIGH-PERFORMANCE BATCH PROCESSING
+    Enhanced log management for HashSmith - Simplified and Reliable
 
 .DESCRIPTION
-    This module provides ultra-fast logging capabilities with:
-    - High-performance batch processing with adaptive flushing
-    - Thread-safe atomic write operations with minimal locking
-    - Memory-efficient log parsing for large files (100k+ entries)
+    This module provides fast logging capabilities with:
+    - High-performance batch processing without timer complications
+    - Thread-safe atomic write operations
+    - Memory-efficient log parsing for large files
     - Enhanced error recovery and corruption detection
-    - Real-time performance monitoring and optimization
-    - Structured logging with JSON export capabilities
-    
-    PERFORMANCE IMPROVEMENTS:
-    - 5x faster log writing through optimized batching
-    - Memory usage reduced by 70% for large log files
-    - Lock-free operations where possible
-    - Intelligent flush strategies based on workload
+    - Simple, reliable architecture
 #>
 
-# Import required modules
-# Note: Dependencies are handled by the main script import order
+# Script-level variables for performance
+$Script:LogBatch = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
+$Script:BatchFlushSize = 500
+$Script:LogWriteLock = [System.Object]::new()
 
-# Script-level variables for enhanced performance
-$Script:BatchProcessor = $null
-$Script:LogStatistics = @{
-    EntriesWritten = 0
-    BatchesProcessed = 0
-    TotalFlushTime = 0
-    AverageFlushSize = 0
-    LastFlushTime = Get-Date
-}
-$Script:PerformanceMonitor = $null
-
-#region Enhanced Batch Processing
+#region Simple Batch Processing
 
 <#
 .SYNOPSIS
-    High-performance batch processor for log entries
+    Simple batch processor without timer complications
 #>
-class LogBatchProcessor {
-    [System.Collections.Concurrent.ConcurrentQueue[string]] $Queue
-    [System.IO.StreamWriter] $StreamWriter
-    [string] $LogPath
-    [int] $MaxBatchSize
-    [int] $FlushIntervalMs
-    [System.Threading.Timer] $FlushTimer
-    [System.Object] $WriteLock
-    [bool] $IsDisposed
-    
-    LogBatchProcessor([string] $logPath, [int] $maxBatchSize, [int] $flushIntervalMs) {
-        $this.Queue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
-        $this.LogPath = $logPath
-        $this.MaxBatchSize = $maxBatchSize
-        $this.FlushIntervalMs = $flushIntervalMs
-        $this.WriteLock = [System.Object]::new()
-        $this.IsDisposed = $false
-        
-        # Initialize StreamWriter with optimal settings
-        $this.InitializeStreamWriter()
-        
-        # Start background flush timer
-        $this.FlushTimer = [System.Threading.Timer]::new(
-            [System.Threading.TimerCallback] { $this.TimerFlush() },
-            $null,
-            $flushIntervalMs,
-            $flushIntervalMs
-        )
-    }
-    
-    [void] InitializeStreamWriter() {
-        try {
-            # Ensure directory exists
-            $directory = [System.IO.Path]::GetDirectoryName($this.LogPath)
-            if ($directory -and -not (Test-Path $directory)) {
-                [System.IO.Directory]::CreateDirectory($directory) | Out-Null
-            }
-            
-            # Create StreamWriter with optimal buffer size and UTF8 encoding
-            $fileStream = [System.IO.FileStream]::new(
-                $this.LogPath,
-                [System.IO.FileMode]::Append,
-                [System.IO.FileAccess]::Write,
-                [System.IO.FileShare]::Read,
-                65536  # 64KB buffer
-            )
-            
-            $this.StreamWriter = [System.IO.StreamWriter]::new(
-                $fileStream,
-                [System.Text.Encoding]::UTF8,
-                65536,  # 64KB buffer
-                $false  # Don't close underlying stream
-            )
-            
-            $this.StreamWriter.AutoFlush = $false  # Manual flushing for better performance
-        }
-        catch {
-            Write-HashSmithLog -Message "Failed to initialize StreamWriter: $($_.Exception.Message)" -Level ERROR -Component 'LOG'
-            throw
-        }
-    }
-    
-    [void] AddEntry([string] $entry) {
-        if ($this.IsDisposed) { return }
-        
-        $this.Queue.Enqueue($entry)
-        
-        # Adaptive flushing based on queue size
-        if ($this.Queue.Count -ge $this.MaxBatchSize) {
-            $this.FlushBatch()
-        }
-    }
-    
-    [void] FlushBatch() {
-        if ($this.IsDisposed -or $this.Queue.Count -eq 0) { return }
-        
-        $entries = [System.Collections.Generic.List[string]]::new()
-        $entry = ""
-        
-        # Dequeue all available entries
-        while ($this.Queue.TryDequeue([ref]$entry)) {
-            $entries.Add($entry)
-            if ($entries.Count -ge $this.MaxBatchSize * 2) {
-                break  # Prevent memory issues with very large queues
-            }
-        }
-        
-        if ($entries.Count -eq 0) { return }
-        
-        # Thread-safe write operation
-        [System.Threading.Monitor]::Enter($this.WriteLock)
-        try {
-            $flushStart = Get-Date
-            
-            foreach ($logEntry in $entries) {
-                $this.StreamWriter.WriteLine($logEntry)
-            }
-            
-            $this.StreamWriter.Flush()
-            
-            # Update statistics
-            $flushTime = (Get-Date) - $flushStart
-            $Script:LogStatistics.EntriesWritten += $entries.Count
-            $Script:LogStatistics.BatchesProcessed += 1
-            $Script:LogStatistics.TotalFlushTime += $flushTime.TotalMilliseconds
-            $Script:LogStatistics.AverageFlushSize = $Script:LogStatistics.EntriesWritten / $Script:LogStatistics.BatchesProcessed
-            $Script:LogStatistics.LastFlushTime = Get-Date
-            
-            Write-HashSmithLog -Message "Batch flushed: $($entries.Count) entries in $($flushTime.TotalMilliseconds.ToString('F1'))ms" -Level DEBUG -Component 'LOG'
-        }
-        catch {
-            # Re-queue failed entries
-            foreach ($failedEntry in $entries) {
-                $this.Queue.Enqueue($failedEntry)
-            }
-            Write-HashSmithLog -Message "Batch flush failed: $($_.Exception.Message)" -Level ERROR -Component 'LOG'
-            throw
-        }
-        finally {
-            [System.Threading.Monitor]::Exit($this.WriteLock)
-        }
-    }
-    
-    [void] TimerFlush() {
-        try {
-            $this.FlushBatch()
-        }
-        catch {
-            # Silent failure in background timer
-        }
-    }
-    
-    [void] Dispose() {
-        if ($this.IsDisposed) { return }
-        $this.IsDisposed = $true
-        
-        # Stop timer
-        if ($this.FlushTimer) {
-            $this.FlushTimer.Dispose()
-        }
-        
-        # Final flush
-        try {
-            $this.FlushBatch()
-        }
-        catch {
-            # Best effort cleanup
-        }
-        
-        # Close StreamWriter
-        if ($this.StreamWriter) {
-            $this.StreamWriter.Close()
-            $this.StreamWriter.Dispose()
-        }
-    }
-}
-
-<#
-.SYNOPSIS
-    Gets or creates the global batch processor
-#>
-function Get-LogBatchProcessor {
+function Add-ToBatch {
     [CmdletBinding()]
     param(
         [string]$LogPath,
-        [int]$MaxBatchSize = 500,
-        [int]$FlushIntervalMs = 3000
+        [string]$Entry
     )
     
-    if ($null -eq $Script:BatchProcessor -or $Script:BatchProcessor.IsDisposed) {
-        $Script:BatchProcessor = [LogBatchProcessor]::new($LogPath, $MaxBatchSize, $FlushIntervalMs)
-        Write-HashSmithLog -Message "High-performance batch processor initialized: $MaxBatchSize entries, $FlushIntervalMs ms intervals" -Level DEBUG -Component 'LOG'
-    }
+    $Script:LogBatch.Enqueue($Entry)
     
-    return $Script:BatchProcessor
+    # Simple threshold-based flushing
+    if ($Script:LogBatch.Count -ge $Script:BatchFlushSize) {
+        Flush-LogBatch -LogPath $LogPath
+    }
 }
-
-#endregion
-
-#region Enhanced Performance Monitoring
 
 <#
 .SYNOPSIS
-    Starts performance monitoring for logging operations
+    Flushes the log batch safely
 #>
-function Start-LoggingPerformanceMonitor {
+function Flush-LogBatch {
     [CmdletBinding()]
-    param()
+    param(
+        [string]$LogPath
+    )
     
-    if ($Script:PerformanceMonitor) { return }
+    if ($Script:LogBatch.Count -eq 0) { return }
     
-    $Script:PerformanceMonitor = Start-Job -ScriptBlock {
-        while ($true) {
-            try {
-                # Monitor logging performance
-                $stats = $using:Script:LogStatistics
-                
-                if ($stats.BatchesProcessed -gt 0) {
-                    $avgFlushTime = $stats.TotalFlushTime / $stats.BatchesProcessed
-                    $entriesPerSecond = if ($stats.TotalFlushTime -gt 0) {
-                        ($stats.EntriesWritten * 1000) / $stats.TotalFlushTime
-                    } else { 0 }
-                    
-                    # Adaptive optimization
-                    if ($avgFlushTime -gt 100) {
-                        # Flushes are taking too long, suggest larger batches
-                        Write-Verbose "LOG-PERF: Average flush time high ($($avgFlushTime.ToString('F1'))ms), consider larger batches"
-                    }
-                    
-                    if ($entriesPerSecond -gt 0) {
-                        Write-Verbose "LOG-PERF: $($entriesPerSecond.ToString('F0')) entries/second throughput"
-                    }
-                }
-                
-                Start-Sleep -Seconds 30
-            }
-            catch {
-                Start-Sleep -Seconds 60
-            }
+    $entries = [System.Collections.Generic.List[string]]::new()
+    $entry = ""
+    
+    # Collect all queued entries
+    while ($Script:LogBatch.TryDequeue([ref]$entry) -and $entries.Count -lt 1000) {
+        $entries.Add($entry)
+    }
+    
+    if ($entries.Count -eq 0) { return }
+    
+    # Thread-safe write
+    [System.Threading.Monitor]::Enter($Script:LogWriteLock)
+    try {
+        $content = $entries -join [Environment]::NewLine
+        if ($content) {
+            $content += [Environment]::NewLine
+            [System.IO.File]::AppendAllText($LogPath, $content, [System.Text.Encoding]::UTF8)
         }
+        Write-Verbose "Batch flushed: $($entries.Count) entries"
     }
-}
-
-<#
-.SYNOPSIS
-    Stops performance monitoring
-#>
-function Stop-LoggingPerformanceMonitor {
-    [CmdletBinding()]
-    param()
-    
-    if ($Script:PerformanceMonitor) {
-        Stop-Job $Script:PerformanceMonitor -ErrorAction SilentlyContinue
-        Remove-Job $Script:PerformanceMonitor -Force -ErrorAction SilentlyContinue
-        $Script:PerformanceMonitor = $null
+    catch {
+        # Re-queue failed entries
+        foreach ($failedEntry in $entries) {
+            $Script:LogBatch.Enqueue($failedEntry)
+        }
+        Write-Warning "Batch flush failed: $($_.Exception.Message)"
+        throw
+    }
+    finally {
+        [System.Threading.Monitor]::Exit($Script:LogWriteLock)
     }
 }
 
@@ -282,11 +88,7 @@ function Stop-LoggingPerformanceMonitor {
 
 <#
 .SYNOPSIS
-    Initializes a HashSmith log file with enhanced header and performance optimization
-
-.DESCRIPTION
-    Creates a new log file with optimized header information and initializes
-    high-performance batch processing for maximum throughput.
+    Initializes a HashSmith log file with header information
 
 .PARAMETER LogPath
     Path to the log file to initialize
@@ -325,7 +127,7 @@ function Initialize-HashSmithLogFile {
         [hashtable]$Configuration
     )
     
-    Write-HashSmithLog -Message "Initializing ENHANCED log file with high-performance processing: $LogPath" -Level INFO -Component 'LOG'
+    Write-HashSmithLog -Message "Initializing log file: $LogPath" -Level INFO -Component 'LOG'
     
     # Create directory if needed
     $logDir = Split-Path $LogPath -Parent
@@ -335,42 +137,31 @@ function Initialize-HashSmithLogFile {
     
     $config = Get-HashSmithConfig
     
-    # Create optimized log file header
+    # Create log file header
     $header = @(
-        "# HashSmith v$($config.Version) ENHANCED - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+        "# HashSmith v$($config.Version) - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
         "# Algorithm: $Algorithm | Source: $SourcePath",
         "# Discovery: $($DiscoveryStats.TotalFound) files found, $($DiscoveryStats.TotalSkipped) skipped, $($DiscoveryStats.TotalSymlinks) symlinks",
         "# Performance: $($DiscoveryStats.DiscoveryTime.ToString('F2'))s discovery, $($DiscoveryStats.FilesPerSecond) files/sec",
-        "# Configuration: Threads=$($Configuration.MaxParallelJobs), ChunkSize=$($Configuration.ChunkSize), Optimized=True",
+        "# Configuration: Threads=$($Configuration.MaxParallelJobs), ChunkSize=$($Configuration.ChunkSize)",
         ""
     )
     
-    # Write header with high-performance method
+    # Write header
     try {
         $headerText = $header -join "`n"
         [System.IO.File]::WriteAllText($LogPath, $headerText, [System.Text.Encoding]::UTF8)
-        
-        # Initialize batch processor for this log file
-        $batchProcessor = Get-LogBatchProcessor -LogPath $LogPath -MaxBatchSize 500 -FlushIntervalMs 3000
-        
-        # Start performance monitoring
-        Start-LoggingPerformanceMonitor
-        
-        Write-HashSmithLog -Message "Enhanced log file initialized with high-performance batch processing" -Level SUCCESS -Component 'LOG'
+        Write-HashSmithLog -Message "Log file initialized successfully" -Level SUCCESS -Component 'LOG'
     }
     catch {
-        Write-HashSmithLog -Message "Failed to initialize enhanced log file: $($_.Exception.Message)" -Level ERROR -Component 'LOG'
+        Write-HashSmithLog -Message "Failed to initialize log file: $($_.Exception.Message)" -Level ERROR -Component 'LOG'
         throw
     }
 }
 
 <#
 .SYNOPSIS
-    Writes hash entry with ultra-fast batch processing
-
-.DESCRIPTION
-    Writes file hash information using high-performance batch processing
-    for maximum throughput and minimal I/O overhead.
+    Writes hash entry with batch processing
 
 .PARAMETER LogPath
     Path to the log file
@@ -443,42 +234,26 @@ function Write-HashSmithHashEntry {
         [switch]$UseBatching
     )
     
-    # Use full path as specified (no relative path conversion for compatibility)
+    # Use full path as specified
     $loggedPath = $FilePath
     
-    # Format entry with optimized string building
+    # Format entry
     $logEntry = if ($ErrorMessage) {
-        # Enhanced error format with category
         "$loggedPath = ERROR($ErrorCategory): $ErrorMessage, size: $Size"
     } else {
-        # Standard format: full/path/to/file.txt = hash, size: size in bytes
         "$loggedPath = $Hash, size: $Size"
     }
     
     if ($UseBatching) {
-        # Use high-performance batch processing
-        try {
-            $batchProcessor = Get-LogBatchProcessor -LogPath $LogPath
-            $batchProcessor.AddEntry($logEntry)
-        }
-        catch {
-            Write-HashSmithLog -Message "Batch processor error, falling back to direct write: $($_.Exception.Message)" -Level WARN -Component 'LOG'
-            # Fallback to direct write
-            Write-HashSmithLogEntryAtomic -LogPath $LogPath -Entry $logEntry
-        }
+        Add-ToBatch -LogPath $LogPath -Entry $logEntry
     } else {
-        # Direct atomic write
         Write-HashSmithLogEntryAtomic -LogPath $LogPath -Entry $logEntry
     }
 }
 
 <#
 .SYNOPSIS
-    Writes log entry atomically with enhanced performance
-
-.DESCRIPTION
-    Performs optimized atomic write operations with enhanced error handling
-    and performance monitoring.
+    Writes log entry atomically
 
 .PARAMETER LogPath
     Path to the log file
@@ -499,35 +274,20 @@ function Write-HashSmithLogEntryAtomic {
         [string]$Entry
     )
     
-    $maxAttempts = 5
+    $maxAttempts = 3
     $attempt = 0
     
     do {
         $attempt++
         try {
-            # Enhanced atomic write with optimized locking
-            $lockFile = "$LogPath.lock"
-            $lockAcquired = $false
-            
+            [System.Threading.Monitor]::Enter($Script:LogWriteLock)
             try {
-                # Use CreateNew for atomic lock creation
-                $lockStream = [System.IO.File]::Create($lockFile)
-                $lockAcquired = $true
-                
-                try {
-                    # High-performance append operation
-                    $entryWithNewline = $Entry + [Environment]::NewLine
-                    [System.IO.File]::AppendAllText($LogPath, $entryWithNewline, [System.Text.Encoding]::UTF8)
-                    return
-                }
-                finally {
-                    $lockStream.Close()
-                }
+                $entryWithNewline = $Entry + [Environment]::NewLine
+                [System.IO.File]::AppendAllText($LogPath, $entryWithNewline, [System.Text.Encoding]::UTF8)
+                return
             }
             finally {
-                if ($lockAcquired) {
-                    Remove-Item -Path $lockFile -Force -ErrorAction SilentlyContinue
-                }
+                [System.Threading.Monitor]::Exit($Script:LogWriteLock)
             }
         }
         catch [System.IO.IOException] {
@@ -536,10 +296,7 @@ function Write-HashSmithLogEntryAtomic {
                 throw
             }
             
-            # Exponential backoff with jitter
-            $baseDelay = 50 * [Math]::Pow(2, $attempt - 1)
-            $jitter = Get-Random -Minimum 0 -Maximum 25
-            $delay = $baseDelay + $jitter
+            $delay = 50 * $attempt
             Start-Sleep -Milliseconds $delay
         }
         catch {
@@ -551,10 +308,7 @@ function Write-HashSmithLogEntryAtomic {
 
 <#
 .SYNOPSIS
-    Flushes log batch with enhanced performance monitoring
-
-.DESCRIPTION
-    Forces immediate flush of all queued log entries with performance tracking
+    Flushes log batch
 
 .PARAMETER LogPath
     Path to the log file
@@ -570,13 +324,8 @@ function Clear-HashSmithLogBatch {
     )
     
     try {
-        if ($Script:BatchProcessor -and -not $Script:BatchProcessor.IsDisposed) {
-            $flushStart = Get-Date
-            $Script:BatchProcessor.FlushBatch()
-            $flushTime = (Get-Date) - $flushStart
-            
-            Write-HashSmithLog -Message "Manual batch flush completed in $($flushTime.TotalMilliseconds.ToString('F1'))ms" -Level DEBUG -Component 'LOG'
-        }
+        Flush-LogBatch -LogPath $LogPath
+        Write-Verbose "Manual batch flush completed"
     }
     catch {
         Write-HashSmithLog -Message "Failed to flush log batch: $($_.Exception.Message)" -Level ERROR -Component 'LOG'
@@ -586,11 +335,7 @@ function Clear-HashSmithLogBatch {
 
 <#
 .SYNOPSIS
-    Loads existing entries with MASSIVE performance improvements for large files
-
-.DESCRIPTION
-    Ultra-fast log file parsing using optimized streaming and parallel processing.
-    Reduces parsing time from minutes to seconds for large log files.
+    Loads existing entries with optimized parsing
 
 .PARAMETER LogPath
     Path to the log file to parse
@@ -612,9 +357,6 @@ function Get-HashSmithExistingEntries {
         Statistics = @{
             ProcessedCount = 0
             FailedCount = 0
-            SymlinkCount = 0
-            RaceConditionCount = 0
-            IntegrityVerifiedCount = 0
             ParseTime = 0
             LinesPerSecond = 0
         }
@@ -624,41 +366,38 @@ function Get-HashSmithExistingEntries {
         return $entries
     }
     
-    Write-HashSmithLog -Message "Loading existing log entries with ENHANCED performance: $LogPath" -Level INFO -Component 'LOG'
+    Write-HashSmithLog -Message "Loading existing log entries: $LogPath" -Level INFO -Component 'LOG'
     
     $parseStart = Get-Date
     
     try {
-        # Get file info for progress calculation
         $fileInfo = Get-Item $LogPath
         $fileSize = $fileInfo.Length
-        Write-Host "📖 Parsing log file ($([Math]::Round($fileSize / 1MB, 2)) MB) with enhanced performance..." -ForegroundColor Yellow
+        Write-Host "📖 Parsing log file ($([Math]::Round($fileSize / 1MB, 2)) MB)..." -ForegroundColor Cyan
         
-        # Use high-performance streaming for large files
+        # Use appropriate parser based on file size
         if ($fileSize -gt 50MB) {
-            Write-Host "   🚀 Large file detected: Using ultra-fast streaming parser" -ForegroundColor Cyan
-            $result = Read-LogFileStreamingOptimized -LogPath $LogPath -Entries $entries
+            Read-LogFileStreaming -LogPath $LogPath -Entries $entries
         } else {
-            Write-Host "   ⚡ Using optimized in-memory parser" -ForegroundColor Green
-            $result = Read-LogFileOptimized -LogPath $LogPath -Entries $entries
+            Read-LogFileOptimized -LogPath $LogPath -Entries $entries
         }
         
         $parseTime = (Get-Date) - $parseStart
         $entries.Statistics.ParseTime = $parseTime.TotalSeconds
         
+        $totalLines = $entries.Statistics.ProcessedCount + $entries.Statistics.FailedCount
         if ($parseTime.TotalSeconds -gt 0) {
-            $entries.Statistics.LinesPerSecond = [Math]::Round(($entries.Statistics.ProcessedCount + $entries.Statistics.FailedCount) / $parseTime.TotalSeconds, 0)
+            $entries.Statistics.LinesPerSecond = [Math]::Round($totalLines / $parseTime.TotalSeconds, 0)
         }
         
-        Write-Host "✅ Enhanced parsing completed in $($parseTime.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
-        Write-Host "   📊 Performance: $($entries.Statistics.LinesPerSecond) lines/second" -ForegroundColor Cyan
+        Write-Host "✅ Parsing completed in $($parseTime.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
+        Write-Host "   📊 Performance: $($entries.Statistics.LinesPerSecond) lines/second" -ForegroundColor Gray
         
-        Write-HashSmithLog -Message "ENHANCED parsing: $($entries.Statistics.ProcessedCount) processed, $($entries.Statistics.FailedCount) failed in $($parseTime.TotalSeconds.ToString('F2'))s" -Level SUCCESS -Component 'LOG'
-        Write-HashSmithLog -Message "Performance: $($entries.Statistics.LinesPerSecond) lines/second (enhanced)" -Level INFO -Component 'LOG'
+        Write-HashSmithLog -Message "Parsing: $($entries.Statistics.ProcessedCount) processed, $($entries.Statistics.FailedCount) failed in $($parseTime.TotalSeconds.ToString('F2'))s" -Level SUCCESS -Component 'LOG'
         
     }
     catch {
-        Write-HashSmithLog -Message "Enhanced log parsing failed: $($_.Exception.Message)" -Level ERROR -Component 'LOG'
+        Write-HashSmithLog -Message "Log parsing failed: $($_.Exception.Message)" -Level ERROR -Component 'LOG'
         throw
     }
     
@@ -678,22 +417,14 @@ function Read-LogFileOptimized {
     
     $allLines = [System.IO.File]::ReadAllLines($LogPath, [System.Text.Encoding]::UTF8)
     $lineCount = 0
-    $processedLines = 0
-    
-    $progressChars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
-    $progressIndex = 0
-    $lastProgressUpdate = Get-Date
     
     foreach ($line in $allLines) {
         $lineCount++
         
-        # Progress update every 1000 lines or every 2 seconds
-        if ($lineCount % 1000 -eq 0 -or ((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 2) {
-            $char = $progressChars[$progressIndex % $progressChars.Length]
+        # Progress update every 5000 lines
+        if ($lineCount % 5000 -eq 0) {
             $percent = [Math]::Round(($lineCount / $allLines.Count) * 100, 1)
-            Write-Host "`r   $char Parsing: $lineCount lines | $percent% | $($Entries.Statistics.ProcessedCount) entries" -NoNewline -ForegroundColor Cyan
-            $lastProgressUpdate = Get-Date
-            $progressIndex++
+            Write-Host "`r   Processing: $lineCount lines ($percent%)" -NoNewline -ForegroundColor Gray
         }
         
         # Skip comments and empty lines
@@ -701,45 +432,36 @@ function Read-LogFileOptimized {
             continue
         }
         
-        $processedLines++
         Parse-LogLine -Line $line -Entries $Entries
     }
     
-    Write-Host "`r$(' ' * 80)`r" -NoNewline  # Clear progress
-    return $Entries
+    Write-Host "`r$(' ' * 50)`r" -NoNewline  # Clear progress
 }
 
 <#
 .SYNOPSIS
-    Ultra-fast streaming log file reader for large files
+    Streaming log file reader for large files
 #>
-function Read-LogFileStreamingOptimized {
+function Read-LogFileStreaming {
     [CmdletBinding()]
     param(
         [string]$LogPath,
         [hashtable]$Entries
     )
     
-    $reader = [System.IO.StreamReader]::new($LogPath, [System.Text.Encoding]::UTF8, $true, 65536)  # 64KB buffer
+    $reader = [System.IO.StreamReader]::new($LogPath, [System.Text.Encoding]::UTF8, $true, 65536)
     $lineCount = 0
-    $processedLines = 0
-    $progressChars = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
-    $progressIndex = 0
-    $lastProgressUpdate = Get-Date
     
     try {
         while (($line = $reader.ReadLine()) -ne $null) {
             $lineCount++
             
-            # Optimized progress reporting
-            if ($lineCount % 2000 -eq 0 -or ((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 3) {
-                $char = $progressChars[$progressIndex % $progressChars.Length]
+            # Progress update
+            if ($lineCount % 10000 -eq 0) {
                 $bytesRead = $reader.BaseStream.Position
                 $fileSize = $reader.BaseStream.Length
                 $percent = if ($fileSize -gt 0) { [Math]::Round(($bytesRead / $fileSize) * 100, 1) } else { 0 }
-                Write-Host "`r   $char Streaming: $lineCount lines | $percent% | $($Entries.Statistics.ProcessedCount) entries" -NoNewline -ForegroundColor Cyan
-                $lastProgressUpdate = Get-Date
-                $progressIndex++
+                Write-Host "`r   Streaming: $lineCount lines ($percent%)" -NoNewline -ForegroundColor Gray
             }
             
             # Skip comments and empty lines
@@ -747,22 +469,19 @@ function Read-LogFileStreamingOptimized {
                 continue
             }
             
-            $processedLines++
             Parse-LogLine -Line $line -Entries $Entries
         }
     }
     finally {
         $reader.Close()
         $reader.Dispose()
-        Write-Host "`r$(' ' * 80)`r" -NoNewline  # Clear progress
+        Write-Host "`r$(' ' * 50)`r" -NoNewline  # Clear progress
     }
-    
-    return $Entries
 }
 
 <#
 .SYNOPSIS
-    Fast log line parser with optimized regex
+    Fast log line parser
 #>
 function Parse-LogLine {
     [CmdletBinding()]
@@ -771,7 +490,6 @@ function Parse-LogLine {
         [hashtable]$Entries
     )
     
-    # Optimized regex patterns for better performance
     if ($Line -match '^(.+?)\s*=\s*([a-fA-F0-9]+)\s*,\s*size:\s*(\d+)$') {
         # Successful entry
         $path = $matches[1]
@@ -811,33 +529,7 @@ function Parse-LogLine {
     }
 }
 
-<#
-.SYNOPSIS
-    Gets logging performance statistics
-#>
-function Get-HashSmithLoggingStats {
-    [CmdletBinding()]
-    [OutputType([hashtable])]
-    param()
-    
-    return $Script:LogStatistics.Clone()
-}
-
 #endregion
-
-# Initialize performance monitoring
-Start-LoggingPerformanceMonitor
-
-# Register cleanup
-$MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
-    # Clean shutdown of batch processor
-    if ($Script:BatchProcessor) {
-        $Script:BatchProcessor.Dispose()
-    }
-    
-    # Stop performance monitoring
-    Stop-LoggingPerformanceMonitor
-}
 
 # Export public functions
 Export-ModuleMember -Function @(
@@ -845,6 +537,5 @@ Export-ModuleMember -Function @(
     'Write-HashSmithHashEntry',
     'Write-HashSmithLogEntryAtomic',
     'Clear-HashSmithLogBatch',
-    'Get-HashSmithExistingEntries',
-    'Get-HashSmithLoggingStats'
+    'Get-HashSmithExistingEntries'
 )
