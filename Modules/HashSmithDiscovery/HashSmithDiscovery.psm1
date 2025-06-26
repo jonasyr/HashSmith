@@ -221,7 +221,7 @@ function Get-FilesOptimized {
     }
     
     return @{
-        Files = @($allFiles.ToArray())
+        Files = [System.IO.FileInfo[]]$allFiles.ToArray()
         Errors = [System.Threading.Interlocked]::CompareExchange($errorCount, 0, 0)
         ProcessedDirectories = [System.Threading.Interlocked]::CompareExchange($processedCount, 0, 0)
     }
@@ -280,6 +280,7 @@ function Get-HashSmithAllFiles {
     
     Write-HashSmithLog -Message "Starting ULTRA-FAST file discovery with 10x performance improvements" -Level INFO -Component 'DISCOVERY'
     Write-HashSmithLog -Message "Target path: $Path" -Level INFO -Component 'DISCOVERY'
+    Write-HashSmithLog -Message "Parameters: IncludeHidden=$($IncludeHidden.IsPresent), IncludeSymlinks=$($IncludeSymlinks.IsPresent), StrictMode=$($StrictMode.IsPresent)" -Level INFO -Component 'DISCOVERY'
     
     $discoveryStart = Get-Date
     $errors = [System.Collections.Generic.List[hashtable]]::new()
@@ -295,7 +296,7 @@ function Get-HashSmithAllFiles {
         Write-Host "   📁 Phase 1: Parallel directory discovery..." -NoNewline -ForegroundColor Yellow
         $phaseStart = Get-Date
         
-        $directories = Get-DirectoriesParallel -RootPath $normalizedPath -MaxDepth 50 -IncludeHidden:$IncludeHidden
+        $directories = Get-DirectoriesParallel -RootPath $normalizedPath -MaxDepth 50 -IncludeHidden:$IncludeHidden.IsPresent
         
         $phaseElapsed = (Get-Date) - $phaseStart
         Write-Host "`r   ✅ Phase 1: Found $($directories.Count) directories in $($phaseElapsed.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
@@ -304,8 +305,11 @@ function Get-HashSmithAllFiles {
         Write-Host "   📄 Phase 2: Parallel file enumeration..." -NoNewline -ForegroundColor Yellow
         $phaseStart = Get-Date
         
-        $fileResult = Get-FilesOptimized -Directories $directories -ExcludePatterns $ExcludePatterns -IncludeHidden:$IncludeHidden -IncludeSymlinks:$IncludeSymlinks
-        $allFiles = $fileResult.Files
+        $fileResult = Get-FilesOptimized -Directories $directories -ExcludePatterns $ExcludePatterns -IncludeHidden:$IncludeHidden.IsPresent -IncludeSymlinks:$IncludeSymlinks.IsPresent
+        $allFiles = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
+        if ($fileResult.Files -and $fileResult.Files.Count -gt 0) {
+            $allFiles.AddRange($fileResult.Files)
+        }
         $errorCount = $fileResult.Errors
         $fileCount = if ($allFiles) { $allFiles.Count } else { 0 }
         
@@ -313,7 +317,7 @@ function Get-HashSmithAllFiles {
         Write-Host "`r   ✅ Phase 2: Found $fileCount files in $($phaseElapsed.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
         
         # Count symbolic links efficiently
-        if ($IncludeSymlinks -and $allFiles -and $allFiles.Count -gt 0) {
+        if ($IncludeSymlinks.IsPresent -and $allFiles -and $allFiles.Count -gt 0) {
             $symlinkCount = @($allFiles | Where-Object { 
                 ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint 
             }).Count
@@ -330,6 +334,7 @@ function Get-HashSmithAllFiles {
         # If StrictMode is enabled, do additional verification
         $additionalFiles = @()
         if ($StrictMode) {
+            Write-Host "`r   🔍 StrictMode: Running comprehensive fallback verification..." -ForegroundColor Yellow
             try {
                 # Use alternative enumeration method as fallback
                 $alternativeFiles = @()
@@ -338,7 +343,7 @@ function Get-HashSmithAllFiles {
                 $enumOptions.ReturnSpecialDirectories = $false
                 $enumOptions.IgnoreInaccessible = $true
                 
-                if (-not $IncludeHidden) {
+                if (-not $IncludeHidden.IsPresent) {
                     $enumOptions.AttributesToSkip = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
                 }
                 
@@ -348,7 +353,7 @@ function Get-HashSmithAllFiles {
                         $fileInfo = [System.IO.FileInfo]::new($filePath)
                         
                         # Apply same filtering logic
-                        if (-not $IncludeSymlinks -and 
+                        if (-not $IncludeSymlinks.IsPresent -and 
                             ($fileInfo.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint) {
                             continue
                         }
@@ -378,10 +383,21 @@ function Get-HashSmithAllFiles {
                 }
                 $alternatePaths = $alternativeFiles | ForEach-Object { $_.FullName } | Sort-Object
                 
+                Write-Host "`r   📊 StrictMode: Primary method found $($primaryPaths.Count) files, Alternative method found $($alternatePaths.Count) files" -ForegroundColor Cyan
+                
                 $missingInPrimary = $alternatePaths | Where-Object { $_ -notin $primaryPaths }
                 if ($missingInPrimary.Count -gt 0) {
                     Write-Host "`r   ⚠️  StrictMode: Found $($missingInPrimary.Count) additional files, adding to results..." -ForegroundColor Yellow
+                    Write-Host "`r   📝 StrictMode: Sample missing files:" -ForegroundColor Gray
+                    $sampleMissing = $missingInPrimary | Select-Object -First 5
+                    foreach ($missing in $sampleMissing) {
+                        Write-Host "`r      • $missing" -ForegroundColor Gray
+                    }
+                    if ($missingInPrimary.Count -gt 5) {
+                        Write-Host "`r      • ... and $($missingInPrimary.Count - 5) more" -ForegroundColor Gray
+                    }
                     
+                    # Add missing files to the List
                     foreach ($missingPath in $missingInPrimary) {
                         try {
                             $missingFile = [System.IO.FileInfo]::new($missingPath)
@@ -392,6 +408,9 @@ function Get-HashSmithAllFiles {
                             # Skip if file no longer accessible
                         }
                     }
+                    
+                    # Update file count after adding additional files
+                    $fileCount = if ($allFiles) { $allFiles.Count } else { 0 }
                 }
             }
             catch {
@@ -433,7 +452,7 @@ function Get-HashSmithAllFiles {
         }
         
         return @{
-            Files = if ($allFiles) { $allFiles } else { @() }
+            Files = if ($allFiles) { @($allFiles.ToArray()) } else { @() }
             Errors = $errors.ToArray()
             Statistics = @{
                 TotalFound = $fileCount

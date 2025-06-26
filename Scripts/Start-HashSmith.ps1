@@ -559,47 +559,14 @@ try {
         }
         Write-Host "   ✅ Fix Mode: Will retry $($filesToProcess.Count) failed files" -ForegroundColor Yellow
         
-    } elseif ($Resume) {
-        # Properly filter already processed files
-        Write-Host "🔄 Resume Mode: Filtering already processed files..." -ForegroundColor Cyan
-        Write-Host "   📊 Found $($existingEntries.Processed.Count) processed files in log" -ForegroundColor Gray
-        
-        $filterStart = Get-Date
-        foreach ($file in $allFiles) {
-            $absolutePath = $file.FullName
-            $relativePath = $absolutePath.Substring($SourceDir.Length).TrimStart('\', '/')
-            
-            # Check if file was already processed
-            $alreadyProcessed = $existingEntries.Processed.ContainsKey($absolutePath) -or 
-                               $existingEntries.Processed.ContainsKey($relativePath) -or
-                               $existingEntries.Processed.ContainsKey($file.FullName)
-            
-            if ($alreadyProcessed) {
-                $skippedResumeCount++
-                if ($skippedResumeCount % 5000 -eq 0) {
-                    Write-Host "`r   ✅ Skipped: $skippedResumeCount already processed" -NoNewline -ForegroundColor Green
-                }
-            } else {
-                $filesToProcess += $file
-            }
-        }
-        
-        $filterTime = (Get-Date) - $filterStart
-        Write-Host "`r   ✅ Resume filtering complete in $($filterTime.TotalSeconds.ToString('F1'))s" -ForegroundColor Green
-        Write-Host "   📊 Discovered: $($allFiles.Count), Logged: $($existingEntries.Processed.Count), Skipped: $skippedResumeCount, Remaining: $($filesToProcess.Count)" -ForegroundColor Gray
-        
-        # Report any discrepancy
-        if ($skippedResumeCount -ne $allFiles.Count -and $filesToProcess.Count -eq 0) {
-            $missingFromLog = $allFiles.Count - $skippedResumeCount
-            Write-Host "   ⚠️  Note: $missingFromLog new/renamed files found" -ForegroundColor Yellow
-        }
-        
-        Write-HashSmithLog -Message "RESUME: Discovered $($allFiles.Count) files, skipped $skippedResumeCount already processed, $($filesToProcess.Count) remaining" -Level SUCCESS -Component 'RESUME'
-        
     } else {
-        # Process all discovered files
+        # Normal mode or Resume mode - let the processor handle filtering
         $filesToProcess = $allFiles
-        Write-Host "🆕 Full Mode: Processing all $($filesToProcess.Count) discovered files" -ForegroundColor Cyan
+        if ($Resume) {
+            Write-Host "🔄 Resume Mode: Processing $($filesToProcess.Count) discovered files (filtering will be done by processor)" -ForegroundColor Cyan
+        } else {
+            Write-Host "🆕 Full Mode: Processing all $($filesToProcess.Count) discovered files" -ForegroundColor Cyan
+        }
     }
     
     if ($filesToProcess.Count -eq 0) {
@@ -769,7 +736,7 @@ try {
     Write-Host ""
     
     # Process files
-    $fileHashes = Start-HashSmithFileProcessing -Files $filesToProcess -LogPath $LogFile -Algorithm $HashAlgorithm -ExistingEntries $existingEntries -BasePath $SourceDir -StrictMode:$StrictMode -VerifyIntegrity:$VerifyIntegrity -MaxThreads $MaxThreads -ChunkSize $ChunkSize -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -ProgressTimeoutMinutes $ProgressTimeoutMinutes -ShowProgress:$ShowProgress -UseParallel:$useParallel
+    $fileHashes = Start-HashSmithFileProcessing -Files $filesToProcess -LogPath $LogFile -Algorithm $HashAlgorithm -ExistingEntries $existingEntries -BasePath $SourceDir -StrictMode:$StrictMode -VerifyIntegrity:$VerifyIntegrity -MaxThreads $MaxThreads -ChunkSize $ChunkSize -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -ProgressTimeoutMinutes $ProgressTimeoutMinutes -ShowProgress:$ShowProgress -UseParallel:$useParallel -Resume:$Resume
     
     # Handle results
     $actualFileHashes = if ($fileHashes -is [hashtable]) {

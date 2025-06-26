@@ -197,7 +197,9 @@ function Start-HashSmithFileProcessing {
         
         [switch]$ShowProgress,
         
-        [switch]$UseParallel
+        [switch]$UseParallel,
+        
+        [switch]$Resume
     )
     
     Write-HashSmithLog -Message "Starting file processing" -Level INFO -Component 'PROCESS'
@@ -210,9 +212,9 @@ function Start-HashSmithFileProcessing {
     $filesToProcess = @()
     $skippedResumeCount = 0
     
-    # Only show resume filtering message if we actually have processed files to skip
+    # Only show resume filtering message if we're actually in resume mode AND have processed files
     $hasProcessedFiles = $ExistingEntries.Processed.Count -gt 0
-    if ($hasProcessedFiles) {
+    if ($Resume -and $hasProcessedFiles) {
         Write-Host "🔍 Filtering files for resume operation..." -ForegroundColor Cyan
     }
     
