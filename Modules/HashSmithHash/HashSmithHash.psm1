@@ -283,7 +283,7 @@ function Get-StreamingHashOptimized {
                     $mbPerSecond = [Math]::Round($bytesPerSecond / 1MB, 1)
                     $fileName = if ($FilePath) { [System.IO.Path]::GetFileName($FilePath) } else { "stream" }
                     
-                    Write-HashSmithProgress -Message "Hashing: $fileName ($progressPercent%) - $mbPerSecond MB/s" -NoSpinner
+                    Write-Host "`r   ⚡ Hashing: $fileName ($progressPercent%) - $mbPerSecond MB/s" -NoNewline -ForegroundColor Green
                     $lastProgressUpdate = $now
                 }
             }
@@ -296,7 +296,7 @@ function Get-StreamingHashOptimized {
         
         # Clear progress line if it was shown
         if ($ProgressCallback -gt 0 -and $fileSize -gt 100MB) {
-            Clear-HashSmithProgress
+            Write-Host "`r$(' ' * 80)`r" -NoNewline
         }
         
         $finalBytesPerSecond = if ($bytesPerSecond -gt 0) { [Math]::Round($bytesPerSecond / 1MB, 1) } else { 0 }

@@ -228,15 +228,14 @@ function Start-HashSmithFileProcessing {
         if ($alreadyProcessed) {
             $skippedResumeCount++
             if ($skippedResumeCount % 1000 -eq 0) {
-                Write-HashSmithProgress -Message "Skipped: $skippedResumeCount already processed" -NoSpinner -Color Green
+                Write-Host "`r   ✅ Skipped: $skippedResumeCount already processed" -NoNewline -ForegroundColor Green
             }
         } else {
             $filesToProcess += $file
         }
     }
     
-    Clear-HashSmithProgress
-    Write-Host "   ✅ Resume filtering complete: $skippedResumeCount skipped, $($filesToProcess.Count) to process" -ForegroundColor Green
+    Write-Host "`r   ✅ Resume filtering complete: $skippedResumeCount skipped, $($filesToProcess.Count) to process" -ForegroundColor Green
     Write-HashSmithLog -Message "RESUME: Skipped $skippedResumeCount already processed files, $($filesToProcess.Count) remaining" -Level SUCCESS -Component 'RESUME'
     
     if ($filesToProcess.Count -eq 0) {
@@ -319,7 +318,7 @@ function Start-HashSmithFileProcessing {
                 
             } -ThrottleLimit $optimalThreads
             
-            # Simple progress monitoring with improved output
+            # Simple progress monitoring
             $progressCount = 0
             $lastProgressUpdate = Get-Date
             while ($progressCount -lt $chunk.Count) {
@@ -329,20 +328,19 @@ function Start-HashSmithFileProcessing {
                 
                 # Only update progress every 2 seconds to reduce flicker
                 if (((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 2) {
-                    Write-HashSmithProgress -Message "Progress: $progressCount/$($chunk.Count) ($progressPercent%)" -NoSpinner
+                    Write-Host "`r   🔄 Progress: $progressCount/$($chunk.Count) ($progressPercent%)" -NoNewline -ForegroundColor Yellow
                     $lastProgressUpdate = Get-Date
                 }
                 
                 # Simple timeout check
                 $elapsed = (Get-Date) - $chunkStartTime
                 if ($elapsed.TotalMinutes -gt $ProgressTimeoutMinutes) {
-                    Clear-HashSmithProgress
-                    Write-Host "   ⚠️  Timeout reached, moving to next chunk..." -ForegroundColor Red
+                    Write-Host "`r   ⚠️  Timeout reached, moving to next chunk..." -ForegroundColor Red
                     break
                 }
             }
             
-            Clear-HashSmithProgress
+            Write-Host "`r$(' ' * 50)`r" -NoNewline
         } else {
             # Sequential processing with progress
             Write-Host "   ⚙️  Sequential processing" -ForegroundColor Gray
@@ -356,7 +354,7 @@ function Start-HashSmithFileProcessing {
                 $fileName = Split-Path $file.FullName -Leaf
                 $progressPercent = [Math]::Round(($chunkFileCount / $chunk.Count) * 100, 1)
                 
-                Write-HashSmithProgress -Message "Processing: $fileName ($progressPercent%)"
+                Write-Host "`r   🔄 Processing: $fileName ($progressPercent%)" -NoNewline -ForegroundColor Cyan
                 
                 $result = Get-HashSmithFileHashSafe -Path $file.FullName -Algorithm $Algorithm -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -VerifyIntegrity:$VerifyIntegrity -StrictMode:$StrictMode
                 
@@ -371,7 +369,7 @@ function Start-HashSmithFileProcessing {
                 $chunkResults += $result
             }
             
-            Complete-HashSmithProgress
+            Write-Host "`r$(' ' * 80)`r" -NoNewline
         }
         
         if ($Script:CancellationRequested) {
