@@ -281,63 +281,176 @@ function Start-HashSmithFileProcessing {
         if ($UseParallel -and $PSVersionTable.PSVersion.Major -ge 7 -and $chunk.Count -gt 10) {
             Write-Host "   🚀 Parallel execution with $optimalThreads threads" -ForegroundColor Green
             
+            # Check if ThreadJob module is available for better progress monitoring
+            $useThreadJob = $false
+            try {
+                if (Get-Command 'Start-ThreadJob' -ErrorAction Stop) {
+                    $useThreadJob = $true
+                }
+            } catch {
+                $useThreadJob = $false
+            }
+            
+            if ($useThreadJob) {
+                # Use ThreadJob for real-time progress monitoring
             # Get module path for parallel runspaces
             $ModulesPath = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
             $ModulesPath = Join-Path $ModulesPath "Modules"
             
-            # Simple parallel processing without complex timer issues
-            $chunkResults = $chunk | ForEach-Object -Parallel {
-                $Algorithm = $using:Algorithm
-                $RetryCount = $using:RetryCount
-                $TimeoutSeconds = $using:TimeoutSeconds
-                $VerifyIntegrity = $using:VerifyIntegrity
-                $StrictMode = $using:StrictMode
-                $ModulesPath = $using:ModulesPath
-                
-                # Import required modules in this runspace
-                try {
-                    Import-Module (Join-Path $ModulesPath "HashSmithHash") -Force -ErrorAction Stop
-                    Import-Module (Join-Path $ModulesPath "HashSmithCore") -Force -ErrorAction Stop
-                } catch {
-                    Write-Error "Failed to import modules in parallel runspace: $($_.Exception.Message)"
-                    return $null
-                }
-                
-                $file = $_
-                $result = Get-HashSmithFileHashSafe -Path $file.FullName -Algorithm $Algorithm -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -VerifyIntegrity:$VerifyIntegrity -StrictMode:$StrictMode
-                
-                # Add file info to result
-                if ($result) {
-                    $result.Path = $file.FullName
-                    $result.Size = $file.Length
-                    $result.Modified = $file.LastWriteTime
-                    $result.IsSymlink = Test-HashSmithSymbolicLink -Path $file.FullName
-                }
-                
-                return $result
-                
-            } -ThrottleLimit $optimalThreads
+            # Use ThreadJob for better progress monitoring
+            $jobs = @()
+            $batchSize = [Math]::Max(1, [Math]::Ceiling($chunk.Count / $optimalThreads))
             
-            # Simple progress monitoring
-            $progressCount = 0
+            Write-Host "`r   🔄 Starting $optimalThreads parallel jobs..." -NoNewline -ForegroundColor Yellow
+            
+            # Split chunk into batches for each thread
+            for ($j = 0; $j -lt $chunk.Count; $j += $batchSize) {
+                $endIdx = [Math]::Min($j + $batchSize - 1, $chunk.Count - 1)
+                $batch = $chunk[$j..$endIdx]
+                
+                $job = Start-ThreadJob -ScriptBlock {
+                    param($Batch, $Algorithm, $RetryCount, $TimeoutSeconds, $VerifyIntegrity, $StrictMode, $ModulesPath)
+                    
+                    # Set parallel mode BEFORE importing any modules
+                    $global:HashSmithParallelMode = $true
+                    
+                    # Import required modules
+                    try {
+                        Import-Module (Join-Path $ModulesPath "HashSmithConfig") -Force -ErrorAction Stop -DisableNameChecking -WarningAction SilentlyContinue -InformationAction SilentlyContinue
+                        Import-Module (Join-Path $ModulesPath "HashSmithLogging") -Force -ErrorAction Stop -DisableNameChecking -WarningAction SilentlyContinue -InformationAction SilentlyContinue
+                        Import-Module (Join-Path $ModulesPath "HashSmithCore") -Force -ErrorAction Stop -DisableNameChecking -WarningAction SilentlyContinue -InformationAction SilentlyContinue
+                        Import-Module (Join-Path $ModulesPath "HashSmithHash") -Force -ErrorAction Stop -DisableNameChecking -WarningAction SilentlyContinue -InformationAction SilentlyContinue
+                        Import-Module (Join-Path $ModulesPath "HashSmithIntegrity") -Force -ErrorAction Stop -DisableNameChecking -WarningAction SilentlyContinue -InformationAction SilentlyContinue
+                    } catch {
+                        return @(@{
+                            Success = $false
+                            Error = "Module import failed: $($_.Exception.Message)"
+                            ErrorCategory = 'ModuleError'
+                            Path = "BATCH_ERROR"
+                            Size = 0
+                            Modified = Get-Date
+                            IsSymlink = $false
+                        })
+                    }
+                    
+                    $results = @()
+                    foreach ($file in $Batch) {
+                        $result = Get-HashSmithFileHashSafe -Path $file.FullName -Algorithm $Algorithm -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -VerifyIntegrity:$VerifyIntegrity -StrictMode:$StrictMode
+                        
+                        if ($result) {
+                            $result.Path = $file.FullName
+                            $result.Size = $file.Length
+                            $result.Modified = $file.LastWriteTime
+                            $result.IsSymlink = Test-HashSmithSymbolicLink -Path $file.FullName
+                        }
+                        
+                        $results += $result
+                    }
+                    
+                    return $results
+                } -ArgumentList $batch, $Algorithm, $RetryCount, $TimeoutSeconds, $VerifyIntegrity, $StrictMode, $ModulesPath
+                
+                $jobs += $job
+            }
+            
+            # Real-time progress monitoring
+            $progressStartTime = Get-Date
             $lastProgressUpdate = Get-Date
-            while ($progressCount -lt $chunk.Count) {
+            $completedFiles = 0
+            
+            while ($jobs | Where-Object { $_.State -eq 'Running' }) {
                 Start-Sleep -Milliseconds 500
-                $progressCount = [Math]::Min($progressCount + 10, $chunk.Count)
-                $progressPercent = [Math]::Round(($progressCount / $chunk.Count) * 100, 1)
+                
+                # Count completed jobs to estimate progress
+                $completedJobs = @($jobs | Where-Object { $_.State -eq 'Completed' }).Count
+                $progressPercent = if ($jobs.Count -gt 0) { 
+                    [Math]::Round(($completedJobs / $jobs.Count) * 100, 1) 
+                } else { 0 }
+                
+                $elapsed = (Get-Date) - $progressStartTime
+                $elapsedStr = if ($elapsed.TotalMinutes -ge 1) {
+                    "$([int]$elapsed.TotalMinutes)m $([int]$elapsed.Seconds)s"
+                } else {
+                    "$([int]$elapsed.TotalSeconds)s"
+                }
                 
                 # Only update progress every 2 seconds to reduce flicker
                 if (((Get-Date) - $lastProgressUpdate).TotalSeconds -ge 2) {
-                    Write-Host "`r   🔄 Progress: $progressCount/$($chunk.Count) ($progressPercent%)" -NoNewline -ForegroundColor Yellow
+                    Write-Host "`r   🔄 Progress: $completedJobs/$($jobs.Count) jobs ($progressPercent%) | $elapsedStr" -NoNewline -ForegroundColor Yellow
                     $lastProgressUpdate = Get-Date
                 }
                 
-                # Simple timeout check
-                $elapsed = (Get-Date) - $chunkStartTime
+                # Timeout check
                 if ($elapsed.TotalMinutes -gt $ProgressTimeoutMinutes) {
-                    Write-Host "`r   ⚠️  Timeout reached, moving to next chunk..." -ForegroundColor Red
+                    Write-Host "`r   ⚠️  Timeout reached, stopping jobs..." -ForegroundColor Red
+                    $jobs | Stop-Job -ErrorAction SilentlyContinue
                     break
                 }
+            }
+            
+            # Collect results
+            $chunkResults = @()
+            foreach ($job in $jobs) {
+                try {
+                    $jobResults = Receive-Job $job -Wait -ErrorAction Stop
+                    if ($jobResults) {
+                        $chunkResults += $jobResults
+                    }
+                } catch {
+                    Write-Host "Job error: $($_.Exception.Message)" -ForegroundColor Red
+                } finally {
+                    Remove-Job $job -Force -ErrorAction SilentlyContinue
+                }
+            }
+            } else {
+                # Fallback to ForEach-Object -Parallel
+                $ModulesPath = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+                $ModulesPath = Join-Path $ModulesPath "Modules"
+                
+                Write-Host "`r   🔄 Starting ForEach-Object parallel processing..." -NoNewline -ForegroundColor Yellow
+                
+                $chunkResults = $chunk | ForEach-Object -Parallel {
+                    $Algorithm = $using:Algorithm
+                    $RetryCount = $using:RetryCount
+                    $TimeoutSeconds = $using:TimeoutSeconds
+                    $VerifyIntegrity = $using:VerifyIntegrity
+                    $StrictMode = $using:StrictMode
+                    $ModulesPath = $using:ModulesPath
+                    
+                    # Set parallel mode BEFORE importing any modules
+                    $global:HashSmithParallelMode = $true
+                    
+                    # Import required modules
+                    try {
+                        Import-Module (Join-Path $ModulesPath "HashSmithConfig") -Force -ErrorAction Stop -DisableNameChecking -WarningAction SilentlyContinue -InformationAction SilentlyContinue
+                        Import-Module (Join-Path $ModulesPath "HashSmithLogging") -Force -ErrorAction Stop -DisableNameChecking -WarningAction SilentlyContinue -InformationAction SilentlyContinue
+                        Import-Module (Join-Path $ModulesPath "HashSmithCore") -Force -ErrorAction Stop -DisableNameChecking -WarningAction SilentlyContinue -InformationAction SilentlyContinue
+                        Import-Module (Join-Path $ModulesPath "HashSmithHash") -Force -ErrorAction Stop -DisableNameChecking -WarningAction SilentlyContinue -InformationAction SilentlyContinue
+                        Import-Module (Join-Path $ModulesPath "HashSmithIntegrity") -Force -ErrorAction Stop -DisableNameChecking -WarningAction SilentlyContinue -InformationAction SilentlyContinue
+                    } catch {
+                        return @{
+                            Success = $false
+                            Error = "Module import failed: $($_.Exception.Message)"
+                            ErrorCategory = 'ModuleError'
+                            Path = $_.FullName
+                            Size = 0
+                            Modified = Get-Date
+                            IsSymlink = $false
+                        }
+                    }
+                    
+                    $file = $_
+                    $result = Get-HashSmithFileHashSafe -Path $file.FullName -Algorithm $Algorithm -RetryCount $RetryCount -TimeoutSeconds $TimeoutSeconds -VerifyIntegrity:$VerifyIntegrity -StrictMode:$StrictMode
+                    
+                    if ($result) {
+                        $result.Path = $file.FullName
+                        $result.Size = $file.Length
+                        $result.Modified = $file.LastWriteTime
+                        $result.IsSymlink = Test-HashSmithSymbolicLink -Path $file.FullName
+                    }
+                    
+                    return $result
+                } -ThrottleLimit $optimalThreads
             }
             
             Write-Host "`r$(' ' * 50)`r" -NoNewline
