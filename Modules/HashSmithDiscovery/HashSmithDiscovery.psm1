@@ -208,7 +208,12 @@ function Get-FilesOptimized {
         }
     }
     
-    Clear-HashSmithProgress
+    # Clear progress display
+    if (Get-Command 'Clear-HashSmithProgress' -ErrorAction SilentlyContinue) {
+        Clear-HashSmithProgress
+    } else {
+        Write-Host "`r$(' ' * 80)`r" -NoNewline
+    }
     
     return @{
         Files = @($allFiles.ToArray())

@@ -40,7 +40,9 @@ function Invoke-TerminationHandlers {
     [CmdletBinding()]
     param()
     
-    Write-HashSmithLog -Message "Executing graceful termination handlers" -Level INFO -Component 'TERMINATION'
+    if (-not $global:HashSmithParallelMode) {
+        Write-HashSmithLog -Message "Executing graceful termination handlers" -Level INFO -Component 'TERMINATION'
+    }
     
     foreach ($handler in $Script:TerminationHandlers.ToArray()) {
         try {
@@ -103,6 +105,11 @@ function Write-HashSmithLog {
         
         [switch]$UseJsonLog
     )
+    
+    # Suppress all logging in parallel mode except critical errors
+    if ($global:HashSmithParallelMode -and $Level -ne 'ERROR') {
+        return
+    }
     
     $config = Get-HashSmithConfig
     $timestamp = Get-Date -Format $config.DateFormat
@@ -290,7 +297,9 @@ function Stop-HashSmithNetworkMonitor {
         Remove-Job $_ -Force -ErrorAction SilentlyContinue
     }
     
-    Write-HashSmithLog -Message "Network monitoring stopped and cleaned up" -Level DEBUG -Component 'NETWORK'
+    if (-not $global:HashSmithParallelMode) {
+        Write-HashSmithLog -Message "Network monitoring stopped and cleaned up" -Level DEBUG -Component 'NETWORK'
+    }
 }
 
 <#
@@ -1018,8 +1027,10 @@ function Complete-HashSmithProgress {
 
 # Register cleanup for module unload
 $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
-    Stop-HashSmithNetworkMonitor
-    Invoke-TerminationHandlers
+    if (-not $global:HashSmithParallelMode) {
+        Stop-HashSmithNetworkMonitor
+        Invoke-TerminationHandlers
+    }
 }
 
 # Export public functions

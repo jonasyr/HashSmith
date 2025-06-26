@@ -108,10 +108,15 @@ function Get-SystemHashCapabilities {
             $capabilities.RecommendedBufferSize = 1MB
         }
         
-        Write-HashSmithLog -Message "System capabilities: $memoryGB GB RAM, $([Environment]::ProcessorCount) cores, AES-NI: $($capabilities.SupportsAESNI)" -Level DEBUG -Component 'HASH'
+        # Only log system capabilities if not in parallel mode
+        if (-not $global:HashSmithParallelMode) {
+            Write-HashSmithLog -Message "System capabilities: $memoryGB GB RAM, $([Environment]::ProcessorCount) cores, AES-NI: $($capabilities.SupportsAESNI)" -Level DEBUG -Component 'HASH'
+        }
         
     } catch {
-        Write-HashSmithLog -Message "Could not detect full system capabilities: $($_.Exception.Message)" -Level WARN -Component 'HASH'
+        if (-not $global:HashSmithParallelMode) {
+            Write-HashSmithLog -Message "Could not detect full system capabilities: $($_.Exception.Message)" -Level WARN -Component 'HASH'
+        }
     }
     
     $Script:SystemCapabilities = $capabilities
@@ -202,7 +207,9 @@ function Get-OptimalBufferSize {
     # Cache the result
     $Script:OptimalBufferCache.TryAdd($cacheKey, $optimalSize) | Out-Null
     
-    Write-HashSmithLog -Message "Optimal buffer for $Algorithm ($([Math]::Round($FileSize/1MB,1))MB): $([Math]::Round($optimalSize/1KB,0))KB" -Level DEBUG -Component 'HASH'
+    if (-not $global:HashSmithParallelMode) {
+        Write-HashSmithLog -Message "Optimal buffer for $Algorithm ($([Math]::Round($FileSize/1MB,1))MB): $([Math]::Round($optimalSize/1KB,0))KB" -Level DEBUG -Component 'HASH'
+    }
     
     return $optimalSize
 }
@@ -423,7 +430,9 @@ function Get-HashSmithFileHashSafe {
         }
         
         try {
-            Write-HashSmithLog -Message "Computing optimized $Algorithm hash (attempt $attempt): $([System.IO.Path]::GetFileName($Path))" -Level DEBUG -Component 'HASH'
+            if (-not $global:HashSmithParallelMode) {
+                Write-HashSmithLog -Message "Computing optimized $Algorithm hash (attempt $attempt): $([System.IO.Path]::GetFileName($Path))" -Level DEBUG -Component 'HASH'
+            }
             
             # Enhanced path normalization
             $normalizedPath = Get-HashSmithNormalizedPath -Path $Path
@@ -601,7 +610,9 @@ function Get-HashSmithFileHashSafe {
     $result.Duration = (Get-Date) - $startTime
     
     if ($result.Success) {
-        Write-HashSmithLog -Message "Optimized hash computed successfully: $([System.IO.Path]::GetFileName($Path)) ($($result.PerformanceMetrics.ThroughputMBps) MB/s)" -Level DEBUG -Component 'HASH'
+        if (-not $global:HashSmithParallelMode) {
+            Write-HashSmithLog -Message "Optimized hash computed successfully: $([System.IO.Path]::GetFileName($Path)) ($($result.PerformanceMetrics.ThroughputMBps) MB/s)" -Level DEBUG -Component 'HASH'
+        }
     } else {
         Write-HashSmithLog -Message "Optimized hash computation failed after $($result.Attempts) attempts: $([System.IO.Path]::GetFileName($Path))" -Level ERROR -Component 'HASH'
         
@@ -626,7 +637,9 @@ function Get-HashSmithFileHashSafe {
 #endregion
 
 # Initialize system capabilities on module load
-$null = Get-SystemHashCapabilities
+if (-not $global:HashSmithParallelMode) {
+    $null = Get-SystemHashCapabilities
+}
 
 # Register cleanup
 $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
