@@ -1,0 +1,32 @@
+# Ignore sample data and test results
+SampleData/
+TestResults.xml
+TestResults/
+TestOutput/
+
+# Ignore logs and temp files
+*.log
+*.tmp
+*.bak
+
+# Ignore PowerShell data and backup files
+*.ps1xml
+*.psd1~
+
+# Ignore editor swap and backup files
+*.swp
+*.swo
+
+# Ignore OS-specific files
+.DS_Store
+
+# Ignore VS Code settings
+.vscode/
+
+# Ignore coverage and package files
+*.coverage
+*.nupkg
+
+# Ignore user-specific files
+*.user
+*.suo
