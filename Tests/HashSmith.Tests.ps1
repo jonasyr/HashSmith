@@ -24,7 +24,12 @@ BeforeAll {
     # Ensure test directories exist
     @($TestHelpersPath, $SampleDataPath) | ForEach-Object {
         if (-not (Test-Path $_)) {
-            New-Item -Path $_ -ItemType Directory -Force | Out-Null
+            try {
+                New-Item -Path $_ -ItemType Directory -Force | Out-Null
+                Write-Verbose "Created directory: $_"
+            } catch {
+                Write-Warning "Failed to create directory ${_}: $($_.Exception.Message)"
+            }
         }
     }
     
@@ -49,15 +54,51 @@ BeforeAll {
     }
     
     # Import test helpers
-    if (Test-Path (Join-Path $TestHelpersPath "TestHelpers.ps1")) {
-        . (Join-Path $TestHelpersPath "TestHelpers.ps1")
+    $helpersScript = Join-Path $TestHelpersPath "TestHelpers.ps1"
+    if (Test-Path $helpersScript) {
+        try {
+            . $helpersScript
+            Write-Verbose "Test helpers loaded successfully"
+        } catch {
+            Write-Warning "Failed to load test helpers: $($_.Exception.Message)"
+            # Continue without helpers for basic functionality
+        }
+    } else {
+        Write-Warning "Test helpers not found at: $helpersScript"
     }
     
     # Initialize test configuration
     Initialize-HashSmithConfig -ConfigOverrides @{ TestMode = $true }
     
-    # Create sample test data files
-    Initialize-TestData -SampleDataPath $SampleDataPath
+    # Create sample test data files if they don't exist
+    $requiredTestFiles = @(
+        @{ Name = "small_text_file.txt"; Content = "HashSmith test content for basic hash computation testing.`nLine 2 of test content.`nFinal line." }
+        @{ Name = "empty_file.txt"; Content = "" }
+    )
+    
+    foreach ($testFile in $requiredTestFiles) {
+        $filePath = Join-Path $SampleDataPath $testFile.Name
+        if (-not (Test-Path $filePath)) {
+            try {
+                $testFile.Content | Set-Content -Path $filePath -Encoding UTF8 -NoNewline
+                Write-Verbose "Created test file: $($testFile.Name)"
+            } catch {
+                Write-Warning "Failed to create test file $($testFile.Name): $($_.Exception.Message)"
+            }
+        }
+    }
+    
+    # Create a simple binary test file if it doesn't exist
+    $binaryFile = Join-Path $SampleDataPath "binary_file.bin"
+    if (-not (Test-Path $binaryFile)) {
+        try {
+            $binaryData = [byte[]](1..100)  # Simple 100-byte test file
+            [System.IO.File]::WriteAllBytes($binaryFile, $binaryData)
+            Write-Verbose "Created binary test file"
+        } catch {
+            Write-Warning "Failed to create binary test file: $($_.Exception.Message)"
+        }
+    }
     
     # Set global test variables with cross-platform temp directory
     $TempDir = if ($env:TEMP) { $env:TEMP } elseif ($env:TMPDIR) { $env:TMPDIR } else { '/tmp' }
