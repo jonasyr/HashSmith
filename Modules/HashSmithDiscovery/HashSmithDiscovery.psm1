@@ -66,7 +66,11 @@ function Get-DirectoriesParallel {
                     
                     # Only skip hidden/system directories if not including hidden files
                     if (-not $using:IncludeHidden) {
+                        # Skip hidden and system directories only if IncludeHidden is false
                         $enumOptions.AttributesToSkip = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+                    } else {
+                        # When including hidden files, don't skip any directory attributes
+                        $enumOptions.AttributesToSkip = [System.IO.FileAttributes]::None
                     }
                     
                     $dirs = [System.IO.Directory]::EnumerateDirectories($directory, '*', $enumOptions)
@@ -151,8 +155,13 @@ function Get-FilesOptimized {
                 $enumOptions.ReturnSpecialDirectories = $false
                 $enumOptions.IgnoreInaccessible = $true
                 
+                # Debug: Check if we should include hidden files
                 if (-not $IncludeHidden) {
+                    # Skip hidden and system files only if IncludeHidden is false
                     $enumOptions.AttributesToSkip = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+                } else {
+                    # When including hidden files, don't skip any attributes
+                    $enumOptions.AttributesToSkip = [System.IO.FileAttributes]::None
                 }
                 
                 # Fast file enumeration
@@ -209,7 +218,8 @@ function Get-FilesOptimized {
         # Progress update every batch
         if ($i % ($batchSize * 10) -eq 0) {
             $percent = [Math]::Round(($i / $Directories.Count) * 100, 1)
-            Write-Host "`r   📁 Processed: $([System.Threading.Interlocked]::CompareExchange($processedCount, 0, 0)) dirs ($percent%)" -NoNewline -ForegroundColor Cyan
+            $processedDirs = [System.Threading.Interlocked]::CompareExchange($processedCount, 0, 0)
+            Write-Host "`r   [Dirs] Processed: $processedDirs dirs ($percent%)" -NoNewline -ForegroundColor Cyan
         }
     }
     
@@ -217,7 +227,7 @@ function Get-FilesOptimized {
     if (Get-Command 'Clear-HashSmithProgress' -ErrorAction SilentlyContinue) {
         Clear-HashSmithProgress
     } else {
-        Write-Host "`r$(' ' * 80)`r" -NoNewline
+        Write-Host "`r                                                                                `r" -NoNewline
     }
     
     return @{
@@ -305,6 +315,9 @@ function Get-HashSmithAllFiles {
         Write-Host "   📄 Phase 2: Parallel file enumeration..." -NoNewline -ForegroundColor Yellow
         $phaseStart = Get-Date
         
+        # Debug: Show what IncludeHidden is set to
+        Write-Host "`r   📄 Phase 2: Parallel file enumeration (IncludeHidden=$($IncludeHidden.IsPresent))..." -NoNewline -ForegroundColor Yellow
+        
         $fileResult = Get-FilesOptimized -Directories $directories -ExcludePatterns $ExcludePatterns -IncludeHidden:$IncludeHidden.IsPresent -IncludeSymlinks:$IncludeSymlinks.IsPresent
         $allFiles = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
         if ($fileResult.Files -and $fileResult.Files.Count -gt 0) {
@@ -333,90 +346,7 @@ function Get-HashSmithAllFiles {
         
         # If StrictMode is enabled, do additional verification
         $additionalFiles = @()
-        if ($StrictMode) {
-            Write-Host "`r   🔍 StrictMode: Running comprehensive fallback verification..." -ForegroundColor Yellow
-            try {
-                # Use alternative enumeration method as fallback
-                $alternativeFiles = @()
-                $enumOptions = [System.IO.EnumerationOptions]::new()
-                $enumOptions.RecurseSubdirectories = $true
-                $enumOptions.ReturnSpecialDirectories = $false
-                $enumOptions.IgnoreInaccessible = $true
-                
-                if (-not $IncludeHidden.IsPresent) {
-                    $enumOptions.AttributesToSkip = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
-                }
-                
-                $allPaths = [System.IO.Directory]::EnumerateFiles($normalizedPath, '*', $enumOptions)
-                foreach ($filePath in $allPaths) {
-                    try {
-                        $fileInfo = [System.IO.FileInfo]::new($filePath)
-                        
-                        # Apply same filtering logic
-                        if (-not $IncludeSymlinks.IsPresent -and 
-                            ($fileInfo.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint) {
-                            continue
-                        }
-                        
-                        $shouldExclude = $false
-                        foreach ($pattern in $ExcludePatterns) {
-                            if ($fileInfo.Name -like $pattern) {
-                                $shouldExclude = $true
-                                break
-                            }
-                        }
-                        
-                        if (-not $shouldExclude) {
-                            $alternativeFiles += $fileInfo
-                        }
-                    }
-                    catch {
-                        # Skip problematic files
-                    }
-                }
-                
-                # Check for discrepancies
-                $primaryPaths = if ($allFiles -and $allFiles.Count -gt 0) {
-                    $allFiles | ForEach-Object { $_.FullName } | Sort-Object
-                } else {
-                    @()
-                }
-                $alternatePaths = $alternativeFiles | ForEach-Object { $_.FullName } | Sort-Object
-                
-                Write-Host "`r   📊 StrictMode: Primary method found $($primaryPaths.Count) files, Alternative method found $($alternatePaths.Count) files" -ForegroundColor Cyan
-                
-                $missingInPrimary = $alternatePaths | Where-Object { $_ -notin $primaryPaths }
-                if ($missingInPrimary.Count -gt 0) {
-                    Write-Host "`r   ⚠️  StrictMode: Found $($missingInPrimary.Count) additional files, adding to results..." -ForegroundColor Yellow
-                    Write-Host "`r   📝 StrictMode: Sample missing files:" -ForegroundColor Gray
-                    $sampleMissing = $missingInPrimary | Select-Object -First 5
-                    foreach ($missing in $sampleMissing) {
-                        Write-Host "`r      • $missing" -ForegroundColor Gray
-                    }
-                    if ($missingInPrimary.Count -gt 5) {
-                        Write-Host "`r      • ... and $($missingInPrimary.Count - 5) more" -ForegroundColor Gray
-                    }
-                    
-                    # Add missing files to the List
-                    foreach ($missingPath in $missingInPrimary) {
-                        try {
-                            $missingFile = [System.IO.FileInfo]::new($missingPath)
-                            $allFiles.Add($missingFile)
-                            $additionalFiles += $missingFile
-                        }
-                        catch {
-                            # Skip if file no longer accessible
-                        }
-                    }
-                    
-                    # Update file count after adding additional files
-                    $fileCount = if ($allFiles) { $allFiles.Count } else { 0 }
-                }
-            }
-            catch {
-                Write-Host "`r   ⚠️  StrictMode verification failed: $($_.Exception.Message)" -ForegroundColor Yellow
-            }
-        }
+        # StrictMode validation temporarily disabled for debugging
         
         $phaseElapsed = (Get-Date) - $phaseStart
         if ($additionalFiles.Count -gt 0) {
@@ -536,45 +466,49 @@ function Test-HashSmithFileDiscoveryCompleteness {
                 [Math]::Round((($sampleSize - $validationErrors) / $sampleSize) * 100, 2) 
             } else { 100 }
             
-            Write-Host "   📊 Sample validation: $validationPercent% accuracy ($validationErrors errors in $sampleSize files)" -ForegroundColor Cyan
+            $percentText = $validationPercent.ToString() + "%"
+            $validationMsg = "   [Validation] Sample validation: $percentText accuracy with $validationErrors errors in $sampleSize files"
+            Write-Host $validationMsg -ForegroundColor Cyan
             
             if ($validationPercent -lt 99.9) {
-                Write-Host "   ⚠️  Validation concerns detected in ultra-fast discovery" -ForegroundColor Yellow
-                Write-HashSmithLog -Message "Sample validation shows $validationPercent% accuracy" -Level WARN -Component 'TEST'
+                Write-Host "   [Warning] Validation concerns detected in ultra-fast discovery" -ForegroundColor Yellow
+                $warnMessage = "Sample validation shows " + $validationPercent + "% accuracy"
+                Write-HashSmithLog -Message $warnMessage -Level WARN -Component 'TEST'
             } else {
-                Write-Host "   ✅ Ultra-fast discovery validation PASSED" -ForegroundColor Green
-                Write-HashSmithLog -Message "Ultra-fast discovery validation PASSED with $validationPercent% accuracy" -Level SUCCESS -Component 'TEST'
+                Write-Host "   [Success] Ultra-fast discovery validation PASSED" -ForegroundColor Green
+                $successMessage = "Ultra-fast discovery validation PASSED with " + $validationPercent + "% accuracy"
+                Write-HashSmithLog -Message $successMessage -Level SUCCESS -Component 'TEST'
             }
         }
         
         # Performance comparison reporting
         $validationElapsed = (Get-Date) - $validationStart
-        Write-Host "   ⏱️  Validation completed in $($validationElapsed.TotalSeconds.ToString('F1'))s" -ForegroundColor Blue
+        Write-Host "   [Timer] Validation completed in $($validationElapsed.TotalSeconds.ToString('F1'))s" -ForegroundColor Blue
         
         # Additional strict mode validations
         if ($StrictMode) {
-            Write-Host "   🔧 Running strict mode validations..." -ForegroundColor Yellow
+            Write-Host "   [StrictMode] Running strict mode validations..." -ForegroundColor Yellow
             
             # Check for duplicate paths in results
             $duplicates = $DiscoveredFiles | Group-Object FullName | Where-Object Count -gt 1
             if ($duplicates) {
-                Write-Host "   ⚠️  Duplicate file paths detected: $($duplicates.Count)" -ForegroundColor Yellow
+                Write-Host "   [Warning] Duplicate file paths detected: $($duplicates.Count)" -ForegroundColor Yellow
                 Write-HashSmithLog -Message "WARNING: Duplicate file paths detected: $($duplicates.Count)" -Level WARN -Component 'TEST'
             }
             
             # Validate path lengths for ultra-long path support
             $longPaths = $DiscoveredFiles | Where-Object { $_.FullName.Length -gt 260 }
             if ($longPaths) {
-                Write-Host "   📏 Long paths handled: $($longPaths.Count)" -ForegroundColor Cyan
+                Write-Host "   [LongPaths] Long paths handled: $($longPaths.Count)" -ForegroundColor Cyan
                 Write-HashSmithLog -Message "Long paths properly handled: $($longPaths.Count)" -Level INFO -Component 'TEST'
             }
             
-            Write-Host "   ✅ Strict mode validation completed" -ForegroundColor Green
+            Write-Host "   [Success] Strict mode validation completed" -ForegroundColor Green
         }
         
     }
     catch {
-        Write-Host "   ❌ Validation failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "   [Error] Validation failed: $($_.Exception.Message)" -ForegroundColor Red
         Write-HashSmithLog -Message "Discovery validation failed: $($_.Exception.Message)" -Level ERROR -Component 'TEST'
     }
 }

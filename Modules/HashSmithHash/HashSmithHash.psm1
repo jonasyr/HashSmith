@@ -243,7 +243,7 @@ function Get-StreamingHashOptimized {
     $buffer2 = [byte[]]::new($optimalBufferSize)
     $useBuffer1 = $true
     
-    $totalRead = 0
+    $totalRead = [Int64]0
     $lastProgressUpdate = Get-Date
     $bytesPerSecond = 0
     
@@ -252,7 +252,8 @@ function Get-StreamingHashOptimized {
         
         while ($totalRead -lt $fileSize) {
             $currentBuffer = if ($useBuffer1) { $buffer1 } else { $buffer2 }
-            $bytesToRead = [Math]::Min($optimalBufferSize, $fileSize - $totalRead)
+            $remainingBytes = $fileSize - $totalRead
+            $bytesToRead = if ($remainingBytes -gt $optimalBufferSize) { $optimalBufferSize } else { [int]$remainingBytes }
             
             $readStart = Get-Date
             $bytesRead = $FileStream.Read($currentBuffer, 0, $bytesToRead)
